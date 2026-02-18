@@ -29,6 +29,39 @@ let lastVideoTime = -1;
 let detectedHands = [];
 let activeMode = 'galaxy';
 const FLOWER_VARIANTS = ['rose', 'sunflower', 'lotus', 'daisy', 'camellia', 'chrysanthemum'];
+const SKELETON_DANCE_STYLES = ['hip-hop', 'wave', 'shuffle', 'robotic'];
+const SKELETON_STYLE_LIGHTS = {
+  'hip-hop': {
+    stageBase: new THREE.Color(0x2a1a10),
+    stageEmissive: new THREE.Color(0xff8f3a),
+    ringBase: new THREE.Color(0xffa257),
+    ringEmissive: new THREE.Color(0xffb76b),
+  },
+  wave: {
+    stageBase: new THREE.Color(0x112235),
+    stageEmissive: new THREE.Color(0x4fbfff),
+    ringBase: new THREE.Color(0x6fd6ff),
+    ringEmissive: new THREE.Color(0x8de4ff),
+  },
+  shuffle: {
+    stageBase: new THREE.Color(0x1d2411),
+    stageEmissive: new THREE.Color(0x9dff4f),
+    ringBase: new THREE.Color(0xbbff6f),
+    ringEmissive: new THREE.Color(0xd4ff94),
+  },
+  robotic: {
+    stageBase: new THREE.Color(0x111319),
+    stageEmissive: new THREE.Color(0x8eb8ff),
+    ringBase: new THREE.Color(0xa3cbff),
+    ringEmissive: new THREE.Color(0xbdddff),
+  },
+};
+const SKELETON_IDLE_LIGHTS = {
+  stageBase: new THREE.Color(0x171822),
+  stageEmissive: new THREE.Color(0x0f111b),
+  ringBase: new THREE.Color(0x8cb8ff),
+  ringEmissive: new THREE.Color(0x5a88d8),
+};
 
 let galaxy = null;
 let solarSystem = null;
@@ -73,6 +106,10 @@ const skeletonControl = {
   currentScale: 1.15,
   danceActive: false,
   spinBoost: 0.01,
+  styleIndex: 0,
+  styleName: SKELETON_DANCE_STYLES[0],
+  openPalmHeld: false,
+  lastStyleSwitchMs: 0,
 };
 
 function setStatus(text) {
@@ -340,6 +377,17 @@ function cycleFlowerVariant() {
   const variantName = FLOWER_VARIANTS[flowerControl.variantIndex];
   applyFlowerVariant(flowerWorld, variantName);
   setStatus(`Flower changed: ${variantName}. Open palm again to switch.`);
+}
+
+function cycleSkeletonDanceStyle() {
+  if (!skeletonWorld) return;
+  const now = performance.now();
+  if (now - skeletonControl.lastStyleSwitchMs < 700) return;
+
+  skeletonControl.lastStyleSwitchMs = now;
+  skeletonControl.styleIndex = (skeletonControl.styleIndex + 1) % SKELETON_DANCE_STYLES.length;
+  skeletonControl.styleName = SKELETON_DANCE_STYLES[skeletonControl.styleIndex];
+  setStatus(`Skeleton style: ${skeletonControl.styleName}. Open palm to switch again.`);
 }
 
 function createButterflySystem() {
@@ -885,7 +933,11 @@ function updatePrimaryFromHand(landmarks) {
 
   if (activeMode === 'skeleton' && skeletonWorld) {
     skeletonControl.targetScale = pinch ? 1.55 : 1.15;
-    skeletonControl.danceActive = openPalm;
+    if (openPalm && !skeletonControl.openPalmHeld) {
+      cycleSkeletonDanceStyle();
+    }
+    skeletonControl.openPalmHeld = openPalm;
+    skeletonControl.danceActive = true;
   }
 }
 
@@ -940,6 +992,7 @@ function switchMode(mode) {
   grabState.pinchActive = false;
   flowerControl.openPalmHeld = false;
   skeletonControl.danceActive = false;
+  skeletonControl.openPalmHeld = false;
   ensureModeObjects();
   setModeVisibility(Boolean(detectedHands[0]));
   setActiveModeButton();
@@ -948,7 +1001,7 @@ function switchMode(mode) {
   } else if (activeMode === 'flower') {
     setStatus('Flower mode selected. Open palm to switch flower type.');
   } else {
-    setStatus('Skeleton mode selected. Open palm to make it dance.');
+    setStatus(`Skeleton mode selected. Style: ${skeletonControl.styleName}. Open palm to switch move.`);
   }
 }
 
@@ -1073,16 +1126,31 @@ function animateSkeleton(t) {
 
   const settle = (value, target, speed = 0.12) => value + (target - value) * speed;
   const dance = skeletonControl.danceActive;
-  const beat = t * 7.2;
-  const groove = Math.sin(beat);
-  const counter = Math.sin(beat + Math.PI * 0.5);
-  const accent = Math.max(0, Math.sin(beat * 2));
-  const sweep = Math.sin(beat * 0.5 + Math.PI * 0.2);
+  const style = skeletonControl.styleName;
+  const styleConfig = style === 'wave'
+    ? { tempo: 5.0, swayX: 0.22, bounce: 0.17, rootY: 0.14, rootYaw: 0.18, rootRoll: 0.09, arm: 0.82, leg: 0.54, robotic: false, stageSpin: 0.011 }
+    : style === 'shuffle'
+      ? { tempo: 10.4, swayX: 0.34, bounce: 0.28, rootY: 0.26, rootYaw: 0.24, rootRoll: 0.12, arm: 0.9, leg: 1.32, robotic: false, stageSpin: 0.02 }
+      : style === 'robotic'
+        ? { tempo: 7.2, swayX: 0.16, bounce: 0.12, rootY: 0.14, rootYaw: 0.14, rootRoll: 0.08, arm: 0.62, leg: 0.52, robotic: true, stageSpin: 0.009 }
+        : { tempo: 7.4, swayX: 0.26, bounce: 0.2, rootY: 0.2, rootYaw: 0.2, rootRoll: 0.1, arm: 1, leg: 0.85, robotic: false, stageSpin: 0.012 };
+  const lightConfig = SKELETON_STYLE_LIGHTS[style] ?? SKELETON_STYLE_LIGHTS['hip-hop'];
 
-  const rootXTarget = dance ? groove * 0.26 : 0;
-  const rootYTarget = dance ? -2.55 + accent * 0.22 : -2.55;
-  const rootRotYTarget = dance ? counter * 0.2 : 0;
-  const rootRotZTarget = dance ? groove * 0.1 : 0;
+  const quantize = (value, steps = 4) => Math.round(value * steps) / steps;
+  const beat = t * styleConfig.tempo;
+  const grooveRaw = Math.sin(beat);
+  const counterRaw = Math.sin(beat + Math.PI * 0.5);
+  const sweepRaw = Math.sin(beat * 0.5 + Math.PI * 0.2);
+  const accentRaw = Math.max(0, Math.sin(beat * 2));
+  const groove = styleConfig.robotic ? quantize(grooveRaw, 3) : grooveRaw;
+  const counter = styleConfig.robotic ? quantize(counterRaw, 3) : counterRaw;
+  const sweep = styleConfig.robotic ? quantize(sweepRaw, 4) : sweepRaw;
+  const accent = styleConfig.robotic ? (Math.sin(beat * 2) > 0 ? 1 : 0) : accentRaw;
+
+  const rootXTarget = dance ? groove * styleConfig.swayX : 0;
+  const rootYTarget = dance ? -2.55 + accent * styleConfig.rootY : -2.55;
+  const rootRotYTarget = dance ? counter * styleConfig.rootYaw : 0;
+  const rootRotZTarget = dance ? groove * styleConfig.rootRoll : 0;
 
   skeletonWorld.position.x = settle(skeletonWorld.position.x, rootXTarget, dance ? 0.18 : 0.12);
   skeletonWorld.position.y = settle(skeletonWorld.position.y, rootYTarget, dance ? 0.2 : 0.12);
@@ -1091,6 +1159,10 @@ function animateSkeleton(t) {
   skeletonWorld.rotation.z = settle(skeletonWorld.rotation.z, rootRotZTarget, dance ? 0.18 : 0.12);
 
   if (dance) {
+    const isWave = style === 'wave';
+    const isShuffle = style === 'shuffle';
+    const isRobotic = style === 'robotic';
+
     const armDriveL = Math.sin(beat * 1.2 + Math.PI * 0.25);
     const armDriveR = Math.sin(beat * 1.2 + Math.PI * 1.25);
     const elbowSwingL = Math.sin(beat * 1.9 + Math.PI * 0.15);
@@ -1099,59 +1171,87 @@ function animateSkeleton(t) {
     const legDriveR = Math.sin(beat + Math.PI);
     const kickL = Math.max(0, Math.sin(beat * 1.6 + Math.PI * 0.15));
     const kickR = Math.max(0, Math.sin(beat * 1.6 + Math.PI * 1.15));
+    const waveHips = isWave ? Math.sin(beat * 0.9 + 0.1) : 0;
+    const waveSpine = isWave ? Math.sin(beat * 0.9 + 0.45) : 0;
+    const waveChest = isWave ? Math.sin(beat * 0.9 + 0.85) : 0;
+    const waveNeck = isWave ? Math.sin(beat * 0.9 + 1.25) : 0;
+    const waveHead = isWave ? Math.sin(beat * 0.9 + 1.6) : 0;
+    const waveArmL = isWave ? Math.sin(beat * 1.05 + 0.35) : 0;
+    const waveArmR = isWave ? Math.sin(beat * 1.05 + 1.95) : 0;
+    const shufflePulse = isShuffle ? Math.sin(beat * 2.6) : 0;
+    const shufflePulseFast = isShuffle ? Math.sin(beat * 5.2) : 0;
+    const shuffleStepL = isShuffle ? Math.max(0, Math.sin(beat * 2.2 + 0.2)) : 0;
+    const shuffleStepR = isShuffle ? Math.max(0, Math.sin(beat * 2.2 + Math.PI + 0.2)) : 0;
+    const robotTick = isRobotic ? (Math.sin(beat * 3.4) > 0 ? 1 : -1) : 0;
+    const robotSnap = isRobotic ? (Math.sin(beat * 6.8) > 0 ? 1 : 0) : 0;
+    const torsoSettle = isRobotic ? 0.42 : 0.22;
+    const armSettle = isRobotic ? 0.5 : 0.26;
+    const legSettle = isRobotic ? 0.44 : 0.22;
 
-    s.hips.rotation.x = settle(s.hips.rotation.x, p.hipsX + accent * 0.05, 0.2);
-    s.hips.rotation.y = settle(s.hips.rotation.y, p.hipsY + counter * 0.15, 0.2);
-    s.hips.rotation.z = settle(s.hips.rotation.z, p.hipsZ + groove * 0.18, 0.2);
-    s.pelvis.rotation.x = settle(s.pelvis.rotation.x, p.pelvisX + accent * 0.08, 0.22);
-    s.pelvis.rotation.y = settle(s.pelvis.rotation.y, p.pelvisY + counter * 0.18, 0.22);
-    s.pelvis.rotation.z = settle(s.pelvis.rotation.z, p.pelvisZ + groove * 0.16, 0.22);
-    s.spine.rotation.x = settle(s.spine.rotation.x, p.spineX + accent * 0.07, 0.2);
-    s.spine.rotation.y = settle(s.spine.rotation.y, p.spineY + counter * 0.14, 0.2);
-    s.ribCage.rotation.y = settle(s.ribCage.rotation.y, p.ribCageY - counter * 0.24, 0.22);
-    s.ribCage.rotation.z = settle(s.ribCage.rotation.z, p.ribCageZ - groove * 0.18, 0.22);
-    s.chest.rotation.z = settle(s.chest.rotation.z, p.chestZ - groove * 0.22 + Math.sin(beat * 2) * 0.06, 0.24);
-    s.chest.rotation.y = settle(s.chest.rotation.y, p.chestY + counter * 0.22, 0.24);
-    s.clavicle.rotation.z = settle(s.clavicle.rotation.z, p.clavicleZ + groove * 0.09, 0.2);
-    s.neck.rotation.x = settle(s.neck.rotation.x, p.neckX + sweep * 0.08, 0.2);
-    s.neck.rotation.y = settle(s.neck.rotation.y, p.neckY + counter * 0.18, 0.2);
-    s.head.rotation.y = settle(s.head.rotation.y, p.headY + counter * 0.36, 0.24);
-    s.head.rotation.x = settle(s.head.rotation.x, p.headX + sweep * 0.1, 0.22);
-    s.head.rotation.z = settle(s.head.rotation.z, groove * 0.08, 0.22);
-    s.jaw.rotation.x = settle(s.jaw.rotation.x, p.jawX + accent * 0.11, 0.2);
+    s.hips.rotation.x = settle(s.hips.rotation.x, p.hipsX + accent * 0.05 * styleConfig.bounce + waveHips * 0.07 + robotTick * 0.06, torsoSettle);
+    s.hips.rotation.y = settle(s.hips.rotation.y, p.hipsY + counter * 0.15 * styleConfig.arm + shufflePulse * 0.08, torsoSettle);
+    s.hips.rotation.z = settle(s.hips.rotation.z, p.hipsZ + groove * 0.18 * styleConfig.leg + shufflePulseFast * 0.05, torsoSettle);
+    s.pelvis.rotation.x = settle(s.pelvis.rotation.x, p.pelvisX + accent * 0.08 * styleConfig.bounce + waveHips * 0.1 + robotTick * 0.07, torsoSettle);
+    s.pelvis.rotation.y = settle(s.pelvis.rotation.y, p.pelvisY + counter * 0.18 * styleConfig.arm + shufflePulse * 0.1, torsoSettle);
+    s.pelvis.rotation.z = settle(s.pelvis.rotation.z, p.pelvisZ + groove * 0.16 * styleConfig.leg + shufflePulseFast * 0.06, torsoSettle);
+    s.spine.rotation.x = settle(s.spine.rotation.x, p.spineX + accent * 0.07 * styleConfig.bounce + waveSpine * 0.12 + robotSnap * 0.06, torsoSettle);
+    s.spine.rotation.y = settle(s.spine.rotation.y, p.spineY + counter * 0.14 * styleConfig.arm + waveSpine * 0.08, torsoSettle);
+    s.ribCage.rotation.y = settle(s.ribCage.rotation.y, p.ribCageY - counter * 0.24 * styleConfig.arm + waveChest * 0.16, torsoSettle);
+    s.ribCage.rotation.z = settle(s.ribCage.rotation.z, p.ribCageZ - groove * 0.18 * styleConfig.leg + waveChest * 0.14, torsoSettle);
+    s.chest.rotation.z = settle(s.chest.rotation.z, p.chestZ - groove * 0.22 * styleConfig.leg + Math.sin(beat * 2) * 0.06 * styleConfig.bounce + waveChest * 0.18 + robotTick * 0.08, torsoSettle + 0.02);
+    s.chest.rotation.y = settle(s.chest.rotation.y, p.chestY + counter * 0.22 * styleConfig.arm + waveChest * 0.16, torsoSettle + 0.02);
+    s.clavicle.rotation.z = settle(s.clavicle.rotation.z, p.clavicleZ + groove * 0.09 * styleConfig.arm + waveChest * 0.1, torsoSettle);
+    s.neck.rotation.x = settle(s.neck.rotation.x, p.neckX + sweep * 0.08 * styleConfig.arm + waveNeck * 0.12, torsoSettle);
+    s.neck.rotation.y = settle(s.neck.rotation.y, p.neckY + counter * 0.18 * styleConfig.arm + waveNeck * 0.14 + robotTick * 0.05, torsoSettle);
+    s.head.rotation.y = settle(s.head.rotation.y, p.headY + counter * 0.36 * styleConfig.arm + waveHead * 0.2 + robotTick * 0.06, torsoSettle + 0.02);
+    s.head.rotation.x = settle(s.head.rotation.x, p.headX + sweep * 0.1 * styleConfig.arm + waveHead * 0.14, torsoSettle);
+    s.head.rotation.z = settle(s.head.rotation.z, groove * 0.08 * styleConfig.leg + waveHead * 0.1, torsoSettle);
+    s.jaw.rotation.x = settle(s.jaw.rotation.x, p.jawX + accent * 0.11 * styleConfig.bounce + robotSnap * 0.08, torsoSettle);
 
-    s.upperArmL.rotation.x = settle(s.upperArmL.rotation.x, p.upperArmLX + 0.28 + armDriveL * 0.45, 0.26);
-    s.upperArmR.rotation.x = settle(s.upperArmR.rotation.x, p.upperArmRX + 0.28 + armDriveR * 0.45, 0.26);
-    s.upperArmL.rotation.y = settle(s.upperArmL.rotation.y, p.upperArmLY + counter * 0.3, 0.24);
-    s.upperArmR.rotation.y = settle(s.upperArmR.rotation.y, p.upperArmRY - counter * 0.3, 0.24);
-    s.upperArmL.rotation.z = settle(s.upperArmL.rotation.z, p.upperArmLZ + 0.65 + groove * 0.5, 0.26);
-    s.upperArmR.rotation.z = settle(s.upperArmR.rotation.z, p.upperArmRZ - 0.65 - groove * 0.5, 0.26);
-    s.foreArmL.rotation.x = settle(s.foreArmL.rotation.x, p.foreArmLX + 0.34 + elbowSwingL * 0.28, 0.26);
-    s.foreArmR.rotation.x = settle(s.foreArmR.rotation.x, p.foreArmRX + 0.34 + elbowSwingR * 0.28, 0.26);
-    s.foreArmL.rotation.z = settle(s.foreArmL.rotation.z, p.foreArmLZ + 0.54 + elbowSwingL * 0.38, 0.26);
-    s.foreArmR.rotation.z = settle(s.foreArmR.rotation.z, p.foreArmRZ - 0.54 - elbowSwingR * 0.38, 0.26);
-    s.handL.rotation.x = settle(s.handL.rotation.x, p.handLX + elbowSwingL * 0.14, 0.24);
-    s.handR.rotation.x = settle(s.handR.rotation.x, p.handRX + elbowSwingR * 0.14, 0.24);
-    s.handL.rotation.z = settle(s.handL.rotation.z, p.handLZ + armDriveL * 0.2, 0.24);
-    s.handR.rotation.z = settle(s.handR.rotation.z, p.handRZ - armDriveR * 0.2, 0.24);
+    s.upperArmL.rotation.x = settle(s.upperArmL.rotation.x, p.upperArmLX + 0.28 + armDriveL * (0.45 * styleConfig.arm) + waveArmL * 0.25 + robotTick * 0.16, armSettle);
+    s.upperArmR.rotation.x = settle(s.upperArmR.rotation.x, p.upperArmRX + 0.28 + armDriveR * (0.45 * styleConfig.arm) + waveArmR * 0.25 - robotTick * 0.16, armSettle);
+    s.upperArmL.rotation.y = settle(s.upperArmL.rotation.y, p.upperArmLY + counter * (0.3 * styleConfig.arm) + waveArmL * 0.2, armSettle);
+    s.upperArmR.rotation.y = settle(s.upperArmR.rotation.y, p.upperArmRY - counter * (0.3 * styleConfig.arm) + waveArmR * 0.2, armSettle);
+    s.upperArmL.rotation.z = settle(s.upperArmL.rotation.z, p.upperArmLZ + 0.65 + groove * (0.5 * styleConfig.arm) + robotSnap * 0.22, armSettle);
+    s.upperArmR.rotation.z = settle(s.upperArmR.rotation.z, p.upperArmRZ - 0.65 - groove * (0.5 * styleConfig.arm) - robotSnap * 0.22, armSettle);
+    s.foreArmL.rotation.x = settle(s.foreArmL.rotation.x, p.foreArmLX + 0.34 + elbowSwingL * (0.28 * styleConfig.arm) + waveArmL * 0.2 + robotTick * 0.13, armSettle);
+    s.foreArmR.rotation.x = settle(s.foreArmR.rotation.x, p.foreArmRX + 0.34 + elbowSwingR * (0.28 * styleConfig.arm) + waveArmR * 0.2 - robotTick * 0.13, armSettle);
+    s.foreArmL.rotation.z = settle(s.foreArmL.rotation.z, p.foreArmLZ + 0.54 + elbowSwingL * (0.38 * styleConfig.arm) + waveArmL * 0.22 + robotSnap * 0.2, armSettle);
+    s.foreArmR.rotation.z = settle(s.foreArmR.rotation.z, p.foreArmRZ - 0.54 - elbowSwingR * (0.38 * styleConfig.arm) - waveArmR * 0.22 - robotSnap * 0.2, armSettle);
+    s.handL.rotation.x = settle(s.handL.rotation.x, p.handLX + elbowSwingL * (0.14 * styleConfig.arm) + waveArmL * 0.18 + robotTick * 0.16, armSettle);
+    s.handR.rotation.x = settle(s.handR.rotation.x, p.handRX + elbowSwingR * (0.14 * styleConfig.arm) + waveArmR * 0.18 - robotTick * 0.16, armSettle);
+    s.handL.rotation.z = settle(s.handL.rotation.z, p.handLZ + armDriveL * (0.2 * styleConfig.arm) + robotSnap * 0.2, armSettle);
+    s.handR.rotation.z = settle(s.handR.rotation.z, p.handRZ - armDriveR * (0.2 * styleConfig.arm) - robotSnap * 0.2, armSettle);
 
-    s.thighL.rotation.x = settle(s.thighL.rotation.x, p.thighLX + legDriveL * 0.28 + kickL * 0.13, 0.22);
-    s.thighR.rotation.x = settle(s.thighR.rotation.x, p.thighRX + legDriveR * 0.28 + kickR * 0.13, 0.22);
-    s.thighL.rotation.z = settle(s.thighL.rotation.z, p.thighLZ + groove * 0.12, 0.2);
-    s.thighR.rotation.z = settle(s.thighR.rotation.z, p.thighRZ - groove * 0.12, 0.2);
-    s.shinL.rotation.x = settle(s.shinL.rotation.x, p.shinLX + kickL * 0.46, 0.22);
-    s.shinR.rotation.x = settle(s.shinR.rotation.x, p.shinRX + kickR * 0.46, 0.22);
-    s.shinL.rotation.z = settle(s.shinL.rotation.z, p.shinLZ + Math.sin(beat * 2) * 0.08, 0.2);
-    s.shinR.rotation.z = settle(s.shinR.rotation.z, p.shinRZ - Math.sin(beat * 2 + Math.PI * 0.5) * 0.08, 0.2);
-    s.footL.rotation.x = settle(s.footL.rotation.x, p.footLX + kickL * 0.16 + accent * 0.08, 0.24);
-    s.footR.rotation.x = settle(s.footR.rotation.x, p.footRX + kickR * 0.16 + accent * 0.08, 0.24);
-    s.footL.rotation.z = settle(s.footL.rotation.z, p.footLZ + groove * 0.06, 0.22);
-    s.footR.rotation.z = settle(s.footR.rotation.z, p.footRZ - groove * 0.06, 0.22);
+    s.thighL.rotation.x = settle(s.thighL.rotation.x, p.thighLX + legDriveL * (0.28 * styleConfig.leg) + kickL * (0.13 * styleConfig.leg) + shuffleStepL * 0.26 + robotTick * 0.12, legSettle);
+    s.thighR.rotation.x = settle(s.thighR.rotation.x, p.thighRX + legDriveR * (0.28 * styleConfig.leg) + kickR * (0.13 * styleConfig.leg) + shuffleStepR * 0.26 - robotTick * 0.12, legSettle);
+    s.thighL.rotation.z = settle(s.thighL.rotation.z, p.thighLZ + groove * (0.12 * styleConfig.leg) + shufflePulse * 0.11, legSettle);
+    s.thighR.rotation.z = settle(s.thighR.rotation.z, p.thighRZ - groove * (0.12 * styleConfig.leg) - shufflePulse * 0.11, legSettle);
+    s.shinL.rotation.x = settle(s.shinL.rotation.x, p.shinLX + kickL * (0.46 * styleConfig.leg) + shuffleStepL * 0.38 + robotSnap * 0.14, legSettle);
+    s.shinR.rotation.x = settle(s.shinR.rotation.x, p.shinRX + kickR * (0.46 * styleConfig.leg) + shuffleStepR * 0.38 + robotSnap * 0.14, legSettle);
+    s.shinL.rotation.z = settle(s.shinL.rotation.z, p.shinLZ + Math.sin(beat * 2) * (0.08 * styleConfig.leg) + shufflePulseFast * 0.08, legSettle);
+    s.shinR.rotation.z = settle(s.shinR.rotation.z, p.shinRZ - Math.sin(beat * 2 + Math.PI * 0.5) * (0.08 * styleConfig.leg) - shufflePulseFast * 0.08, legSettle);
+    s.footL.rotation.x = settle(s.footL.rotation.x, p.footLX + kickL * (0.16 * styleConfig.leg) + accent * (0.08 * styleConfig.bounce) + shuffleStepL * 0.34 + shufflePulseFast * 0.11, legSettle + 0.02);
+    s.footR.rotation.x = settle(s.footR.rotation.x, p.footRX + kickR * (0.16 * styleConfig.leg) + accent * (0.08 * styleConfig.bounce) + shuffleStepR * 0.34 - shufflePulseFast * 0.11, legSettle + 0.02);
+    s.footL.rotation.z = settle(s.footL.rotation.z, p.footLZ + groove * (0.06 * styleConfig.leg) + shufflePulse * 0.14 + robotTick * 0.1, legSettle);
+    s.footR.rotation.z = settle(s.footR.rotation.z, p.footRZ - groove * (0.06 * styleConfig.leg) - shufflePulse * 0.14 - robotTick * 0.1, legSettle);
 
-    if (s.stage) s.stage.material.emissiveIntensity = 0.24 + accent * 0.38;
+    if (s.stage) {
+      const stageMat = s.stage.material;
+      const styleBoost = isShuffle ? Math.abs(shufflePulseFast) * 0.12 : 0;
+      const strobe = isRobotic ? (Math.sin(beat * 18) > 0 ? 0.34 : 0) : 0;
+      stageMat.color.lerp(lightConfig.stageBase, 0.12);
+      stageMat.emissive.lerp(lightConfig.stageEmissive, 0.16);
+      stageMat.emissiveIntensity = 0.24 + accent * 0.38 + styleBoost + strobe;
+    }
     if (s.stageRing) {
-      s.stageRing.rotation.z += 0.012;
-      s.stageRing.material.emissiveIntensity = 0.26 + accent * 0.44;
+      const ringMat = s.stageRing.material;
+      const ringBoost = isShuffle ? Math.abs(shufflePulseFast) * 0.14 : 0;
+      const ringStrobe = isRobotic ? (Math.sin(beat * 18) > 0 ? 0.4 : 0.04) : 0;
+      s.stageRing.rotation.z += styleConfig.stageSpin;
+      ringMat.color.lerp(lightConfig.ringBase, 0.18);
+      ringMat.emissive.lerp(lightConfig.ringEmissive, 0.2);
+      ringMat.emissiveIntensity = 0.26 + accent * 0.44 + ringBoost + ringStrobe;
     }
   } else {
     s.hips.rotation.x = settle(s.hips.rotation.x, p.hipsX, 0.12);
@@ -1199,10 +1299,18 @@ function animateSkeleton(t) {
     s.footR.rotation.x = settle(s.footR.rotation.x, p.footRX, 0.12);
     s.footL.rotation.z = settle(s.footL.rotation.z, p.footLZ, 0.12);
     s.footR.rotation.z = settle(s.footR.rotation.z, p.footRZ, 0.12);
-    if (s.stage) s.stage.material.emissiveIntensity = settle(s.stage.material.emissiveIntensity, 0.32, 0.08);
+    if (s.stage) {
+      const stageMat = s.stage.material;
+      stageMat.color.lerp(SKELETON_IDLE_LIGHTS.stageBase, 0.1);
+      stageMat.emissive.lerp(SKELETON_IDLE_LIGHTS.stageEmissive, 0.1);
+      stageMat.emissiveIntensity = settle(stageMat.emissiveIntensity, 0.32, 0.08);
+    }
     if (s.stageRing) {
+      const ringMat = s.stageRing.material;
       s.stageRing.rotation.z = settle(s.stageRing.rotation.z, 0, 0.08);
-      s.stageRing.material.emissiveIntensity = settle(s.stageRing.material.emissiveIntensity, 0.28, 0.08);
+      ringMat.color.lerp(SKELETON_IDLE_LIGHTS.ringBase, 0.1);
+      ringMat.emissive.lerp(SKELETON_IDLE_LIGHTS.ringEmissive, 0.1);
+      ringMat.emissiveIntensity = settle(ringMat.emissiveIntensity, 0.28, 0.08);
     }
   }
 }
@@ -1310,13 +1418,12 @@ function detectHands() {
       grabState.pinchActive = false;
       flowerControl.openPalmHeld = false;
       skeletonControl.danceActive = false;
+      skeletonControl.openPalmHeld = false;
       setStatus(`Show your hand to start ${activeMode} mode`);
     } else {
       setModeVisibility(true);
       if (activeMode === 'skeleton') {
-        setStatus(skeletonControl.danceActive
-          ? 'Skeleton mode: open palm detected, dancing'
-          : 'Skeleton mode: show open palm to dance');
+        setStatus(`Skeleton mode: ${skeletonControl.styleName} style. Open palm to switch move.`);
       } else if (secondaryHand) {
         setStatus(activeMode === 'galaxy'
           ? 'Galaxy mode: hand 1 galaxy, hand 2 planets'
