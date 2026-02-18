@@ -578,17 +578,83 @@ function createSkeletonWorld() {
     root.add(toeL, toeR);
   }
 
+  const stage = new THREE.Mesh(
+    new THREE.CircleGeometry(2.95, 48),
+    new THREE.MeshStandardMaterial({
+      color: 0x171822,
+      roughness: 0.82,
+      metalness: 0.06,
+      emissive: 0x0f111b,
+      emissiveIntensity: 0.32,
+      transparent: true,
+      opacity: 0.94,
+    }),
+  );
+  stage.rotation.x = -Math.PI / 2;
+  stage.position.set(0, -2.33, 0.03);
+  root.add(stage);
+
+  const stageRing = new THREE.Mesh(
+    new THREE.TorusGeometry(2.55, 0.06, 12, 64),
+    new THREE.MeshStandardMaterial({
+      color: 0x8cb8ff,
+      roughness: 0.4,
+      metalness: 0.15,
+      emissive: 0x5a88d8,
+      emissiveIntensity: 0.28,
+      transparent: true,
+      opacity: 0.88,
+    }),
+  );
+  stageRing.rotation.x = Math.PI / 2;
+  stageRing.position.set(0, -2.31, 0.04);
+  root.add(stageRing);
+
   const defaultPose = {
     chestZ: 0,
+    chestY: 0,
     headY: 0,
+    headX: 0,
+    hipsX: 0,
+    hipsY: 0,
+    hipsZ: 0,
+    pelvisX: 0,
+    pelvisY: 0,
+    pelvisZ: 0,
+    spineX: 0,
+    spineY: 0,
+    ribCageY: 0,
+    ribCageZ: 0,
+    neckX: 0,
+    neckY: 0,
+    clavicleZ: 0,
+    jawX: Math.PI / 2.1,
+    upperArmLX: 0,
+    upperArmRX: 0,
+    upperArmLY: 0,
+    upperArmRY: 0,
     upperArmLZ: 0.42,
     upperArmRZ: -0.42,
+    foreArmLX: 0,
+    foreArmRX: 0,
     foreArmLZ: 0.08,
     foreArmRZ: -0.08,
+    handLX: 0,
+    handRX: 0,
+    handLZ: 0,
+    handRZ: 0,
+    thighLX: 0,
+    thighRX: 0,
     thighLZ: 0.06,
     thighRZ: -0.06,
+    shinLX: 0,
+    shinRX: 0,
     shinLZ: 0.03,
     shinRZ: -0.03,
+    footLX: Math.PI / 2.35,
+    footRX: Math.PI / 2.35,
+    footLZ: 0,
+    footRZ: 0,
   };
 
   root.userData = {
@@ -620,6 +686,8 @@ function createSkeletonWorld() {
     ankleR,
     footL,
     footR,
+    stage,
+    stageRing,
     defaultPose,
   };
 
@@ -997,10 +1065,6 @@ function animateSkeleton(t) {
   skeletonControl.currentScale += (skeletonControl.targetScale - skeletonControl.currentScale) * 0.12;
   const basePulse = 1 + Math.sin(t * 1.4) * 0.01;
   skeletonWorld.scale.setScalar(skeletonControl.currentScale * basePulse * 1.35);
-  skeletonWorld.rotation.x += (0 - skeletonWorld.rotation.x) * 0.16;
-  skeletonWorld.rotation.y += (0 - skeletonWorld.rotation.y) * 0.16;
-  skeletonWorld.rotation.z += (0 - skeletonWorld.rotation.z) * 0.16;
-  skeletonWorld.position.y += (-2.55 - skeletonWorld.position.y) * 0.12;
 
   const s = skeletonWorld.userData;
   if (!s) return;
@@ -1008,51 +1072,138 @@ function animateSkeleton(t) {
   if (!p) return;
 
   const settle = (value, target, speed = 0.12) => value + (target - value) * speed;
+  const dance = skeletonControl.danceActive;
+  const beat = t * 7.2;
+  const groove = Math.sin(beat);
+  const counter = Math.sin(beat + Math.PI * 0.5);
+  const accent = Math.max(0, Math.sin(beat * 2));
+  const sweep = Math.sin(beat * 0.5 + Math.PI * 0.2);
 
-  if (skeletonControl.danceActive) {
-    const beat = t * 6.8;
-    const groove = Math.sin(beat);
-    const counter = Math.sin(beat + Math.PI * 0.5);
-    const accent = Math.max(0, Math.sin(beat * 2));
+  const rootXTarget = dance ? groove * 0.26 : 0;
+  const rootYTarget = dance ? -2.55 + accent * 0.22 : -2.55;
+  const rootRotYTarget = dance ? counter * 0.2 : 0;
+  const rootRotZTarget = dance ? groove * 0.1 : 0;
 
-    // Keep feet planted: motion is from hips/chest/arms with subtle knee springs.
-    s.hips.rotation.z = settle(s.hips.rotation.z, groove * 0.1, 0.18);
-    s.hips.rotation.y = settle(s.hips.rotation.y, counter * 0.09, 0.18);
-    s.chest.rotation.z = settle(s.chest.rotation.z, -groove * 0.2 + Math.sin(beat * 2) * 0.05, 0.2);
-    s.chest.rotation.y = settle(s.chest.rotation.y, counter * 0.2, 0.2);
-    s.head.rotation.y = settle(s.head.rotation.y, counter * 0.34, 0.2);
-    s.head.rotation.x = settle(s.head.rotation.x, Math.sin(beat * 0.5) * 0.08, 0.18);
-    s.jaw.rotation.x = settle(s.jaw.rotation.x, Math.PI / 2.1 + accent * 0.1, 0.2);
+  skeletonWorld.position.x = settle(skeletonWorld.position.x, rootXTarget, dance ? 0.18 : 0.12);
+  skeletonWorld.position.y = settle(skeletonWorld.position.y, rootYTarget, dance ? 0.2 : 0.12);
+  skeletonWorld.rotation.x = settle(skeletonWorld.rotation.x, 0, 0.16);
+  skeletonWorld.rotation.y = settle(skeletonWorld.rotation.y, rootRotYTarget, dance ? 0.18 : 0.12);
+  skeletonWorld.rotation.z = settle(skeletonWorld.rotation.z, rootRotZTarget, dance ? 0.18 : 0.12);
 
-    s.upperArmL.rotation.z = settle(s.upperArmL.rotation.z, p.upperArmLZ + 0.55 + groove * 0.52 + accent * 0.12, 0.24);
-    s.upperArmR.rotation.z = settle(s.upperArmR.rotation.z, p.upperArmRZ - 0.55 - groove * 0.52 + accent * 0.12, 0.24);
-    s.foreArmL.rotation.z = settle(s.foreArmL.rotation.z, p.foreArmLZ + 0.5 + Math.sin(beat * 1.5) * 0.4, 0.24);
-    s.foreArmR.rotation.z = settle(s.foreArmR.rotation.z, p.foreArmRZ - 0.5 - Math.sin(beat * 1.5 + Math.PI * 0.3) * 0.4, 0.24);
+  if (dance) {
+    const armDriveL = Math.sin(beat * 1.2 + Math.PI * 0.25);
+    const armDriveR = Math.sin(beat * 1.2 + Math.PI * 1.25);
+    const elbowSwingL = Math.sin(beat * 1.9 + Math.PI * 0.15);
+    const elbowSwingR = Math.sin(beat * 1.9 + Math.PI * 1.15);
+    const legDriveL = Math.sin(beat);
+    const legDriveR = Math.sin(beat + Math.PI);
+    const kickL = Math.max(0, Math.sin(beat * 1.6 + Math.PI * 0.15));
+    const kickR = Math.max(0, Math.sin(beat * 1.6 + Math.PI * 1.15));
 
-    s.thighL.rotation.z = settle(s.thighL.rotation.z, p.thighLZ + groove * 0.08, 0.16);
-    s.thighR.rotation.z = settle(s.thighR.rotation.z, p.thighRZ - groove * 0.08, 0.16);
-    s.shinL.rotation.z = settle(s.shinL.rotation.z, p.shinLZ + Math.sin(beat * 2) * 0.05, 0.16);
-    s.shinR.rotation.z = settle(s.shinR.rotation.z, p.shinRZ - Math.sin(beat * 2 + Math.PI * 0.5) * 0.05, 0.16);
-    s.footL.rotation.x = settle(s.footL.rotation.x, Math.PI / 2.35 + accent * 0.06, 0.2);
-    s.footR.rotation.x = settle(s.footR.rotation.x, Math.PI / 2.35 + accent * 0.06, 0.2);
+    s.hips.rotation.x = settle(s.hips.rotation.x, p.hipsX + accent * 0.05, 0.2);
+    s.hips.rotation.y = settle(s.hips.rotation.y, p.hipsY + counter * 0.15, 0.2);
+    s.hips.rotation.z = settle(s.hips.rotation.z, p.hipsZ + groove * 0.18, 0.2);
+    s.pelvis.rotation.x = settle(s.pelvis.rotation.x, p.pelvisX + accent * 0.08, 0.22);
+    s.pelvis.rotation.y = settle(s.pelvis.rotation.y, p.pelvisY + counter * 0.18, 0.22);
+    s.pelvis.rotation.z = settle(s.pelvis.rotation.z, p.pelvisZ + groove * 0.16, 0.22);
+    s.spine.rotation.x = settle(s.spine.rotation.x, p.spineX + accent * 0.07, 0.2);
+    s.spine.rotation.y = settle(s.spine.rotation.y, p.spineY + counter * 0.14, 0.2);
+    s.ribCage.rotation.y = settle(s.ribCage.rotation.y, p.ribCageY - counter * 0.24, 0.22);
+    s.ribCage.rotation.z = settle(s.ribCage.rotation.z, p.ribCageZ - groove * 0.18, 0.22);
+    s.chest.rotation.z = settle(s.chest.rotation.z, p.chestZ - groove * 0.22 + Math.sin(beat * 2) * 0.06, 0.24);
+    s.chest.rotation.y = settle(s.chest.rotation.y, p.chestY + counter * 0.22, 0.24);
+    s.clavicle.rotation.z = settle(s.clavicle.rotation.z, p.clavicleZ + groove * 0.09, 0.2);
+    s.neck.rotation.x = settle(s.neck.rotation.x, p.neckX + sweep * 0.08, 0.2);
+    s.neck.rotation.y = settle(s.neck.rotation.y, p.neckY + counter * 0.18, 0.2);
+    s.head.rotation.y = settle(s.head.rotation.y, p.headY + counter * 0.36, 0.24);
+    s.head.rotation.x = settle(s.head.rotation.x, p.headX + sweep * 0.1, 0.22);
+    s.head.rotation.z = settle(s.head.rotation.z, groove * 0.08, 0.22);
+    s.jaw.rotation.x = settle(s.jaw.rotation.x, p.jawX + accent * 0.11, 0.2);
+
+    s.upperArmL.rotation.x = settle(s.upperArmL.rotation.x, p.upperArmLX + 0.28 + armDriveL * 0.45, 0.26);
+    s.upperArmR.rotation.x = settle(s.upperArmR.rotation.x, p.upperArmRX + 0.28 + armDriveR * 0.45, 0.26);
+    s.upperArmL.rotation.y = settle(s.upperArmL.rotation.y, p.upperArmLY + counter * 0.3, 0.24);
+    s.upperArmR.rotation.y = settle(s.upperArmR.rotation.y, p.upperArmRY - counter * 0.3, 0.24);
+    s.upperArmL.rotation.z = settle(s.upperArmL.rotation.z, p.upperArmLZ + 0.65 + groove * 0.5, 0.26);
+    s.upperArmR.rotation.z = settle(s.upperArmR.rotation.z, p.upperArmRZ - 0.65 - groove * 0.5, 0.26);
+    s.foreArmL.rotation.x = settle(s.foreArmL.rotation.x, p.foreArmLX + 0.34 + elbowSwingL * 0.28, 0.26);
+    s.foreArmR.rotation.x = settle(s.foreArmR.rotation.x, p.foreArmRX + 0.34 + elbowSwingR * 0.28, 0.26);
+    s.foreArmL.rotation.z = settle(s.foreArmL.rotation.z, p.foreArmLZ + 0.54 + elbowSwingL * 0.38, 0.26);
+    s.foreArmR.rotation.z = settle(s.foreArmR.rotation.z, p.foreArmRZ - 0.54 - elbowSwingR * 0.38, 0.26);
+    s.handL.rotation.x = settle(s.handL.rotation.x, p.handLX + elbowSwingL * 0.14, 0.24);
+    s.handR.rotation.x = settle(s.handR.rotation.x, p.handRX + elbowSwingR * 0.14, 0.24);
+    s.handL.rotation.z = settle(s.handL.rotation.z, p.handLZ + armDriveL * 0.2, 0.24);
+    s.handR.rotation.z = settle(s.handR.rotation.z, p.handRZ - armDriveR * 0.2, 0.24);
+
+    s.thighL.rotation.x = settle(s.thighL.rotation.x, p.thighLX + legDriveL * 0.28 + kickL * 0.13, 0.22);
+    s.thighR.rotation.x = settle(s.thighR.rotation.x, p.thighRX + legDriveR * 0.28 + kickR * 0.13, 0.22);
+    s.thighL.rotation.z = settle(s.thighL.rotation.z, p.thighLZ + groove * 0.12, 0.2);
+    s.thighR.rotation.z = settle(s.thighR.rotation.z, p.thighRZ - groove * 0.12, 0.2);
+    s.shinL.rotation.x = settle(s.shinL.rotation.x, p.shinLX + kickL * 0.46, 0.22);
+    s.shinR.rotation.x = settle(s.shinR.rotation.x, p.shinRX + kickR * 0.46, 0.22);
+    s.shinL.rotation.z = settle(s.shinL.rotation.z, p.shinLZ + Math.sin(beat * 2) * 0.08, 0.2);
+    s.shinR.rotation.z = settle(s.shinR.rotation.z, p.shinRZ - Math.sin(beat * 2 + Math.PI * 0.5) * 0.08, 0.2);
+    s.footL.rotation.x = settle(s.footL.rotation.x, p.footLX + kickL * 0.16 + accent * 0.08, 0.24);
+    s.footR.rotation.x = settle(s.footR.rotation.x, p.footRX + kickR * 0.16 + accent * 0.08, 0.24);
+    s.footL.rotation.z = settle(s.footL.rotation.z, p.footLZ + groove * 0.06, 0.22);
+    s.footR.rotation.z = settle(s.footR.rotation.z, p.footRZ - groove * 0.06, 0.22);
+
+    if (s.stage) s.stage.material.emissiveIntensity = 0.24 + accent * 0.38;
+    if (s.stageRing) {
+      s.stageRing.rotation.z += 0.012;
+      s.stageRing.material.emissiveIntensity = 0.26 + accent * 0.44;
+    }
   } else {
-    s.hips.rotation.z = settle(s.hips.rotation.z, 0, 0.12);
-    s.hips.rotation.y = settle(s.hips.rotation.y, 0, 0.12);
+    s.hips.rotation.x = settle(s.hips.rotation.x, p.hipsX, 0.12);
+    s.hips.rotation.y = settle(s.hips.rotation.y, p.hipsY, 0.12);
+    s.hips.rotation.z = settle(s.hips.rotation.z, p.hipsZ, 0.12);
+    s.pelvis.rotation.x = settle(s.pelvis.rotation.x, p.pelvisX, 0.12);
+    s.pelvis.rotation.y = settle(s.pelvis.rotation.y, p.pelvisY, 0.12);
+    s.pelvis.rotation.z = settle(s.pelvis.rotation.z, p.pelvisZ, 0.12);
+    s.spine.rotation.x = settle(s.spine.rotation.x, p.spineX, 0.12);
+    s.spine.rotation.y = settle(s.spine.rotation.y, p.spineY, 0.12);
+    s.ribCage.rotation.y = settle(s.ribCage.rotation.y, p.ribCageY, 0.12);
+    s.ribCage.rotation.z = settle(s.ribCage.rotation.z, p.ribCageZ, 0.12);
     s.chest.rotation.z = settle(s.chest.rotation.z, p.chestZ, 0.12);
-    s.chest.rotation.y = settle(s.chest.rotation.y, 0, 0.12);
+    s.chest.rotation.y = settle(s.chest.rotation.y, p.chestY, 0.12);
+    s.clavicle.rotation.z = settle(s.clavicle.rotation.z, p.clavicleZ, 0.12);
+    s.neck.rotation.x = settle(s.neck.rotation.x, p.neckX, 0.12);
+    s.neck.rotation.y = settle(s.neck.rotation.y, p.neckY, 0.12);
     s.head.rotation.y = settle(s.head.rotation.y, p.headY, 0.12);
-    s.head.rotation.x = settle(s.head.rotation.x, 0, 0.12);
-    s.jaw.rotation.x = settle(s.jaw.rotation.x, Math.PI / 2.1, 0.12);
+    s.head.rotation.x = settle(s.head.rotation.x, p.headX, 0.12);
+    s.head.rotation.z = settle(s.head.rotation.z, 0, 0.12);
+    s.jaw.rotation.x = settle(s.jaw.rotation.x, p.jawX, 0.12);
+    s.upperArmL.rotation.x = settle(s.upperArmL.rotation.x, p.upperArmLX, 0.12);
+    s.upperArmR.rotation.x = settle(s.upperArmR.rotation.x, p.upperArmRX, 0.12);
+    s.upperArmL.rotation.y = settle(s.upperArmL.rotation.y, p.upperArmLY, 0.12);
+    s.upperArmR.rotation.y = settle(s.upperArmR.rotation.y, p.upperArmRY, 0.12);
     s.upperArmL.rotation.z = settle(s.upperArmL.rotation.z, p.upperArmLZ, 0.12);
     s.upperArmR.rotation.z = settle(s.upperArmR.rotation.z, p.upperArmRZ, 0.12);
+    s.foreArmL.rotation.x = settle(s.foreArmL.rotation.x, p.foreArmLX, 0.12);
+    s.foreArmR.rotation.x = settle(s.foreArmR.rotation.x, p.foreArmRX, 0.12);
     s.foreArmL.rotation.z = settle(s.foreArmL.rotation.z, p.foreArmLZ, 0.12);
     s.foreArmR.rotation.z = settle(s.foreArmR.rotation.z, p.foreArmRZ, 0.12);
+    s.handL.rotation.x = settle(s.handL.rotation.x, p.handLX, 0.12);
+    s.handR.rotation.x = settle(s.handR.rotation.x, p.handRX, 0.12);
+    s.handL.rotation.z = settle(s.handL.rotation.z, p.handLZ, 0.12);
+    s.handR.rotation.z = settle(s.handR.rotation.z, p.handRZ, 0.12);
+    s.thighL.rotation.x = settle(s.thighL.rotation.x, p.thighLX, 0.12);
+    s.thighR.rotation.x = settle(s.thighR.rotation.x, p.thighRX, 0.12);
     s.thighL.rotation.z = settle(s.thighL.rotation.z, p.thighLZ, 0.12);
     s.thighR.rotation.z = settle(s.thighR.rotation.z, p.thighRZ, 0.12);
+    s.shinL.rotation.x = settle(s.shinL.rotation.x, p.shinLX, 0.12);
+    s.shinR.rotation.x = settle(s.shinR.rotation.x, p.shinRX, 0.12);
     s.shinL.rotation.z = settle(s.shinL.rotation.z, p.shinLZ, 0.12);
     s.shinR.rotation.z = settle(s.shinR.rotation.z, p.shinRZ, 0.12);
-    s.footL.rotation.x = settle(s.footL.rotation.x, Math.PI / 2.35, 0.12);
-    s.footR.rotation.x = settle(s.footR.rotation.x, Math.PI / 2.35, 0.12);
+    s.footL.rotation.x = settle(s.footL.rotation.x, p.footLX, 0.12);
+    s.footR.rotation.x = settle(s.footR.rotation.x, p.footRX, 0.12);
+    s.footL.rotation.z = settle(s.footL.rotation.z, p.footLZ, 0.12);
+    s.footR.rotation.z = settle(s.footR.rotation.z, p.footRZ, 0.12);
+    if (s.stage) s.stage.material.emissiveIntensity = settle(s.stage.material.emissiveIntensity, 0.32, 0.08);
+    if (s.stageRing) {
+      s.stageRing.rotation.z = settle(s.stageRing.rotation.z, 0, 0.08);
+      s.stageRing.material.emissiveIntensity = settle(s.stageRing.material.emissiveIntensity, 0.28, 0.08);
+    }
   }
 }
 
