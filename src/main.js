@@ -28,7 +28,6 @@ let lastVideoTime = -1;
 let detectedHands = [];
 let galaxy = null;
 let solarSystem = null;
-let galaxyDepthReset = 24;
 const raycaster = new THREE.Raycaster();
 const grabState = {
   planet: null,
@@ -70,31 +69,41 @@ function describeError(err) {
 }
 
 function createGalaxy() {
-  const count = 7000;
-  const arms = 5;
-  const radius = 14;
-  const randomSpread = 1.8;
+  const count = 9000;
+  const arms = 4;
+  const radius = 11;
+  const randomSpread = 1.1;
 
   const positions = new Float32Array(count * 3);
+  const basePositions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
+  const radii = new Float32Array(count);
+  const twists = new Float32Array(count);
 
-  const inner = new THREE.Color(0x94b7ff);
-  const outer = new THREE.Color(0xf4c4ff);
+  const inner = new THREE.Color(0xd6e5ff);
+  const middle = new THREE.Color(0x8cb8ff);
+  const outer = new THREE.Color(0xff9de0);
 
   for (let i = 0; i < count; i += 1) {
     const i3 = i * 3;
-    const r = Math.random() * radius;
+    const r = Math.pow(Math.random(), 0.8) * radius;
     const armAngle = ((i % arms) / arms) * Math.PI * 2;
-    const spinAngle = r * 0.7;
-    const randomX = (Math.random() - 0.5) * randomSpread;
-    const randomY = (Math.random() - 0.5) * randomSpread * 0.6;
-    const randomZ = (Math.random() - 0.5) * randomSpread;
+    const spinAngle = r * 1.05;
+    const randomX = (Math.random() - 0.5) * randomSpread * (r / radius);
+    const randomY = (Math.random() - 0.5) * randomSpread * 0.35;
+    const randomZ = (Math.random() - 0.5) * randomSpread * (r / radius);
 
     positions[i3] = Math.cos(armAngle + spinAngle) * r + randomX;
-    positions[i3 + 1] = (Math.random() - 0.5) * 1.8 + randomY;
+    positions[i3 + 1] = (Math.random() - 0.5) * 0.9 + randomY;
     positions[i3 + 2] = Math.sin(armAngle + spinAngle) * r + randomZ;
+    basePositions[i3] = positions[i3];
+    basePositions[i3 + 1] = positions[i3 + 1];
+    basePositions[i3 + 2] = positions[i3 + 2];
+    radii[i] = Math.hypot(positions[i3], positions[i3 + 2]);
+    twists[i] = (Math.random() - 0.5) * 0.9;
 
-    const color = inner.clone().lerp(outer, r / radius);
+    const midMix = Math.min(1, (r / radius) * 1.6);
+    const color = inner.clone().lerp(middle, midMix).lerp(outer, Math.max(0, (r / radius) - 0.45));
     colors[i3] = color.r;
     colors[i3 + 1] = color.g;
     colors[i3 + 2] = color.b;
@@ -105,16 +114,21 @@ function createGalaxy() {
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
   const material = new THREE.PointsMaterial({
-    size: 0.1,
+    size: 0.08,
     vertexColors: true,
     transparent: true,
-    opacity: 0.95,
+    opacity: 0.9,
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
 
   const points = new THREE.Points(geometry, material);
   points.frustumCulled = false;
+  points.userData = {
+    basePositions,
+    radii,
+    twists,
+  };
   scene.add(points);
   return points;
 }
@@ -457,11 +471,12 @@ function detectHands() {
       setStatus('Hand detected: galaxy + planets online');
     }
 
+    if (primaryHand && galaxy) {
+      galaxy.visible = true;
+    }
+
     if (!primaryHand && galaxy) {
-      scene.remove(galaxy);
-      galaxy.geometry.dispose();
-      galaxy.material.dispose();
-      galaxy = null;
+      galaxy.visible = false;
     }
 
     if (!primaryHand && solarSystem) {
@@ -490,18 +505,33 @@ function detectHands() {
 function animate() {
   requestAnimationFrame(animate);
 
-  if (galaxy) {
+  if (galaxy?.visible) {
     controlState.currentScale += (controlState.targetScale - controlState.currentScale) * 0.14;
-    galaxy.scale.setScalar(controlState.currentScale);
+    const t = performance.now() * 0.001;
+    const pulse = 1 + Math.sin(t * 2.2) * 0.045;
+    galaxy.scale.setScalar(controlState.currentScale * pulse);
 
-    galaxy.rotation.z += controlState.spinBoost;
+    galaxy.rotation.z += controlState.spinBoost * 0.9;
 
     const pos = galaxy.geometry.attributes.position.array;
-    for (let i = 2; i < pos.length; i += 3) {
-      pos[i] += controlState.depthSpeed;
-      if (pos[i] > galaxyDepthReset) pos[i] = -galaxyDepthReset;
+    const { basePositions, radii, twists } = galaxy.userData;
+    const swirlSpeed = THREE.MathUtils.mapLinear(controlState.depthSpeed, 0.015, 0.1, 0.5, 2);
+    for (let i = 0; i < radii.length; i += 1) {
+      const i3 = i * 3;
+      const bx = basePositions[i3];
+      const by = basePositions[i3 + 1];
+      const bz = basePositions[i3 + 2];
+      const r = radii[i];
+      const baseAngle = Math.atan2(bz, bx);
+      const angle = baseAngle + t * (0.1 * swirlSpeed + r * 0.0028) + twists[i];
+      const wobble = 1 + Math.sin(t * 1.8 + twists[i] * 8 + r * 0.85) * 0.06;
+
+      pos[i3] = Math.cos(angle) * r * wobble + Math.sin(t * 0.8 + i * 0.013) * 0.02;
+      pos[i3 + 1] = by + Math.sin(t * 1.4 + r * 0.7 + twists[i] * 3) * 0.04;
+      pos[i3 + 2] = Math.sin(angle) * r * wobble;
     }
     galaxy.geometry.attributes.position.needsUpdate = true;
+    galaxy.material.opacity = 0.82 + Math.sin(t * 2.1) * 0.12;
 
     if (controlState.colorShiftActive) {
       controlState.colorHue = (controlState.colorHue + 0.003) % 1;
