@@ -34,6 +34,7 @@ let galaxy = null;
 let solarSystem = null;
 let flowerWorld = null;
 let butterflySystem = null;
+let skeletonWorld = null;
 
 const raycaster = new THREE.Raycaster();
 const grabState = {
@@ -65,6 +66,13 @@ const companionControl = {
   tiltX: 0,
   tiltY: 0,
   motionSpeed: 0.01,
+};
+
+const skeletonControl = {
+  targetScale: 1.15,
+  currentScale: 1.15,
+  danceActive: false,
+  spinBoost: 0.01,
 };
 
 function setStatus(text) {
@@ -438,6 +446,187 @@ function createButterflySystem() {
   return group;
 }
 
+function createSkeletonWorld() {
+  const root = new THREE.Group();
+  root.position.set(0, -2.55, -2.8);
+  root.scale.setScalar(1.35);
+  root.visible = false;
+
+  const boneMat = new THREE.MeshStandardMaterial({ color: 0xf0eee7, roughness: 0.42, metalness: 0.03 });
+  const darkMat = new THREE.MeshStandardMaterial({ color: 0x1f1e1b, roughness: 0.85, metalness: 0.01 });
+
+  function addJoint(radius, x, y, z, parent = root) {
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(radius, 20, 20), boneMat.clone());
+    mesh.position.set(x, y, z);
+    parent.add(mesh);
+    return mesh;
+  }
+
+  function addBone(radiusTop, radiusBottom, length, x, y, z, rotX, rotY, rotZ, parent = root) {
+    const mesh = new THREE.Mesh(new THREE.CapsuleGeometry((radiusTop + radiusBottom) * 0.5, length - radiusTop, 6, 12), boneMat.clone());
+    mesh.position.set(x, y, z);
+    mesh.rotation.set(rotX, rotY, rotZ);
+    parent.add(mesh);
+    return mesh;
+  }
+
+  const hips = addJoint(0.24, 0, 0.08, 0);
+
+  const pelvis = new THREE.Group();
+  const iliacL = new THREE.Mesh(new THREE.TorusGeometry(0.22, 0.045, 10, 20, Math.PI * 1.15), boneMat.clone());
+  iliacL.rotation.set(Math.PI / 2.05, 0, Math.PI / 2.6);
+  iliacL.position.set(-0.17, 0.05, 0.02);
+  const iliacR = iliacL.clone();
+  iliacR.position.x *= -1;
+  iliacR.rotation.z *= -1;
+  const sacrum = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.28, 4, 10), boneMat.clone());
+  sacrum.position.set(0, -0.03, -0.02);
+  sacrum.rotation.x = Math.PI / 2;
+  pelvis.add(iliacL, iliacR, sacrum);
+  root.add(pelvis);
+
+  const spine = addBone(0.075, 0.085, 1.48, 0, 0.9, 0, 0, 0, 0);
+  const vertebrae = [];
+  for (let i = 0; i < 7; i += 1) {
+    const v = new THREE.Mesh(new THREE.CylinderGeometry(0.085 - i * 0.005, 0.085 - i * 0.005, 0.05, 10), boneMat.clone());
+    v.position.set(0, 0.35 + i * 0.2, 0);
+    vertebrae.push(v);
+    root.add(v);
+  }
+
+  const chest = addJoint(0.2, 0, 1.68, 0);
+
+  const ribCage = new THREE.Group();
+  for (let i = 0; i < 6; i += 1) {
+    const r = new THREE.Mesh(new THREE.TorusGeometry(0.43 - i * 0.035, 0.018, 8, 20, Math.PI * 1.2), boneMat.clone());
+    r.rotation.set(Math.PI / 2, 0, Math.PI + 0.23);
+    r.position.set(0, 1.68 - i * 0.11, -0.02 + i * 0.01);
+    ribCage.add(r);
+  }
+  root.add(ribCage);
+
+  const neck = addBone(0.05, 0.055, 0.28, 0, 2.02, 0, 0, 0, 0);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 30, 30), boneMat.clone());
+  head.scale.set(1, 1.1, 1.15);
+  head.position.set(0, 2.45, 0.01);
+  root.add(head);
+
+  const jaw = new THREE.Mesh(new THREE.TorusGeometry(0.18, 0.03, 10, 18, Math.PI * 1.1), boneMat.clone());
+  jaw.position.set(0, 2.28, 0.13);
+  jaw.rotation.set(Math.PI / 2.2, 0, 0);
+  root.add(jaw);
+
+  const eyeSocketL = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 12), darkMat);
+  const eyeSocketR = eyeSocketL.clone();
+  eyeSocketL.position.set(-0.11, 2.46, 0.29);
+  eyeSocketR.position.set(0.11, 2.46, 0.29);
+  root.add(eyeSocketL, eyeSocketR);
+  const noseHole = new THREE.Mesh(new THREE.ConeGeometry(0.045, 0.08, 3), darkMat);
+  noseHole.position.set(0, 2.37, 0.32);
+  noseHole.rotation.x = Math.PI / 2;
+  root.add(noseHole);
+
+  const teeth = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.045, 0.03), boneMat.clone());
+  teeth.position.set(0, 2.18, 0.2);
+  root.add(teeth);
+
+  const clavicle = new THREE.Group();
+  const clavicleL = new THREE.Mesh(new THREE.CapsuleGeometry(0.03, 0.35, 4, 10), boneMat.clone());
+  clavicleL.position.set(-0.2, 1.78, 0.04);
+  clavicleL.rotation.z = Math.PI / 3.6;
+  const clavicleR = clavicleL.clone();
+  clavicleR.position.x *= -1;
+  clavicleR.rotation.z *= -1;
+  clavicle.add(clavicleL, clavicleR);
+  root.add(clavicle);
+  const shoulderL = addJoint(0.13, -0.54, 1.66, 0);
+  const shoulderR = addJoint(0.13, 0.54, 1.66, 0);
+  const upperArmL = addBone(0.065, 0.055, 0.72, -0.84, 1.4, 0, 0, 0, 0.42);
+  const upperArmR = addBone(0.065, 0.055, 0.72, 0.84, 1.4, 0, 0, 0, -0.42);
+  const foreArmL = addBone(0.055, 0.045, 0.68, -1.2, 0.95, 0, 0, 0, 0.08);
+  const foreArmR = addBone(0.055, 0.045, 0.68, 1.2, 0.95, 0, 0, 0, -0.08);
+  const handL = addJoint(0.085, -1.37, 0.62, 0);
+  const handR = addJoint(0.085, 1.37, 0.62, 0);
+
+  for (let i = 0; i < 4; i += 1) {
+    const fingerL = new THREE.Mesh(new THREE.CapsuleGeometry(0.013, 0.11, 3, 8), boneMat.clone());
+    fingerL.position.set(-1.43 - i * 0.012, 0.56 - i * 0.01, 0.05 - i * 0.035);
+    fingerL.rotation.set(0.08, 0, 0.5);
+    const fingerR = fingerL.clone();
+    fingerR.position.x *= -1;
+    fingerR.rotation.z *= -1;
+    root.add(fingerL, fingerR);
+  }
+
+  const thighL = addBone(0.1, 0.08, 1.0, -0.24, -0.62, 0, 0, 0, 0.06);
+  const thighR = addBone(0.1, 0.08, 1.0, 0.24, -0.62, 0, 0, 0, -0.06);
+  const kneeL = addJoint(0.11, -0.3, -1.1, 0);
+  const kneeR = addJoint(0.11, 0.3, -1.1, 0);
+  const shinL = addBone(0.08, 0.06, 1.0, -0.33, -1.62, 0, 0, 0, 0.03);
+  const shinR = addBone(0.08, 0.06, 1.0, 0.33, -1.62, 0, 0, 0, -0.03);
+  const ankleL = addJoint(0.08, -0.35, -2.1, 0.03);
+  const ankleR = addJoint(0.08, 0.35, -2.1, 0.03);
+  const footL = addBone(0.05, 0.04, 0.56, -0.4, -2.15, 0.21, Math.PI / 2.35, 0, 0);
+  const footR = addBone(0.05, 0.04, 0.56, 0.4, -2.15, 0.21, Math.PI / 2.35, 0, 0);
+
+  for (let i = 0; i < 5; i += 1) {
+    const toeL = new THREE.Mesh(new THREE.CapsuleGeometry(0.012, 0.08, 3, 8), boneMat.clone());
+    toeL.position.set(-0.56 - i * 0.04, -2.17, 0.22 - i * 0.03);
+    toeL.rotation.set(Math.PI / 2.35, 0, 0);
+    const toeR = toeL.clone();
+    toeR.position.x *= -1;
+    root.add(toeL, toeR);
+  }
+
+  const defaultPose = {
+    chestZ: 0,
+    headY: 0,
+    upperArmLZ: 0.42,
+    upperArmRZ: -0.42,
+    foreArmLZ: 0.08,
+    foreArmRZ: -0.08,
+    thighLZ: 0.06,
+    thighRZ: -0.06,
+    shinLZ: 0.03,
+    shinRZ: -0.03,
+  };
+
+  root.userData = {
+    hips,
+    pelvis,
+    chest,
+    ribCage,
+    vertebrae,
+    clavicle,
+    spine,
+    neck,
+    jaw,
+    head,
+    shoulderL,
+    shoulderR,
+    upperArmL,
+    upperArmR,
+    foreArmL,
+    foreArmR,
+    handL,
+    handR,
+    thighL,
+    thighR,
+    kneeL,
+    kneeR,
+    shinL,
+    shinR,
+    ankleL,
+    ankleR,
+    footL,
+    footR,
+    defaultPose,
+  };
+
+  scene.add(root);
+  return root;
+}
+
 function disposeObject3D(root) {
   root.traverse((obj) => {
     if (obj.geometry) obj.geometry.dispose();
@@ -625,9 +814,20 @@ function updatePrimaryFromHand(landmarks) {
     }
     flowerControl.openPalmHeld = openPalm;
   }
+
+  if (activeMode === 'skeleton' && skeletonWorld) {
+    skeletonControl.targetScale = pinch ? 1.55 : 1.15;
+    skeletonControl.danceActive = openPalm;
+  }
 }
 
 function updateCompanionFromHand(landmarks) {
+  if (activeMode === 'skeleton') {
+    dropGrabbedItem();
+    grabState.pinchActive = false;
+    return;
+  }
+
   if (!landmarks) {
     dropGrabbedItem();
     grabState.pinchActive = false;
@@ -654,6 +854,7 @@ function ensureModeObjects() {
   if (!solarSystem) solarSystem = createSolarSystem();
   if (!flowerWorld) flowerWorld = createFlowerWorld();
   if (!butterflySystem) butterflySystem = createButterflySystem();
+  if (!skeletonWorld) skeletonWorld = createSkeletonWorld();
 }
 
 function setModeVisibility(visible) {
@@ -661,6 +862,7 @@ function setModeVisibility(visible) {
   if (solarSystem) solarSystem.visible = visible && activeMode === 'galaxy';
   if (flowerWorld) flowerWorld.visible = visible && activeMode === 'flower';
   if (butterflySystem) butterflySystem.visible = visible && activeMode === 'flower';
+  if (skeletonWorld) skeletonWorld.visible = visible && activeMode === 'skeleton';
 }
 
 function switchMode(mode) {
@@ -669,13 +871,16 @@ function switchMode(mode) {
   dropGrabbedItem();
   grabState.pinchActive = false;
   flowerControl.openPalmHeld = false;
+  skeletonControl.danceActive = false;
   ensureModeObjects();
   setModeVisibility(Boolean(detectedHands[0]));
   setActiveModeButton();
   if (activeMode === 'galaxy') {
     setStatus('Galaxy mode selected. Hand 1 galaxy, hand 2 planets.');
-  } else {
+  } else if (activeMode === 'flower') {
     setStatus('Flower mode selected. Open palm to switch flower type.');
+  } else {
+    setStatus('Skeleton mode selected. Open palm to make it dance.');
   }
 }
 
@@ -786,6 +991,71 @@ function animateButterflies(t) {
   }
 }
 
+function animateSkeleton(t) {
+  if (!skeletonWorld?.visible) return;
+
+  skeletonControl.currentScale += (skeletonControl.targetScale - skeletonControl.currentScale) * 0.12;
+  const basePulse = 1 + Math.sin(t * 1.4) * 0.01;
+  skeletonWorld.scale.setScalar(skeletonControl.currentScale * basePulse * 1.35);
+  skeletonWorld.rotation.x += (0 - skeletonWorld.rotation.x) * 0.16;
+  skeletonWorld.rotation.y += (0 - skeletonWorld.rotation.y) * 0.16;
+  skeletonWorld.rotation.z += (0 - skeletonWorld.rotation.z) * 0.16;
+  skeletonWorld.position.y += (-2.55 - skeletonWorld.position.y) * 0.12;
+
+  const s = skeletonWorld.userData;
+  if (!s) return;
+  const p = s.defaultPose;
+  if (!p) return;
+
+  const settle = (value, target, speed = 0.12) => value + (target - value) * speed;
+
+  if (skeletonControl.danceActive) {
+    const beat = t * 6.8;
+    const groove = Math.sin(beat);
+    const counter = Math.sin(beat + Math.PI * 0.5);
+    const accent = Math.max(0, Math.sin(beat * 2));
+
+    // Keep feet planted: motion is from hips/chest/arms with subtle knee springs.
+    s.hips.rotation.z = settle(s.hips.rotation.z, groove * 0.1, 0.18);
+    s.hips.rotation.y = settle(s.hips.rotation.y, counter * 0.09, 0.18);
+    s.chest.rotation.z = settle(s.chest.rotation.z, -groove * 0.2 + Math.sin(beat * 2) * 0.05, 0.2);
+    s.chest.rotation.y = settle(s.chest.rotation.y, counter * 0.2, 0.2);
+    s.head.rotation.y = settle(s.head.rotation.y, counter * 0.34, 0.2);
+    s.head.rotation.x = settle(s.head.rotation.x, Math.sin(beat * 0.5) * 0.08, 0.18);
+    s.jaw.rotation.x = settle(s.jaw.rotation.x, Math.PI / 2.1 + accent * 0.1, 0.2);
+
+    s.upperArmL.rotation.z = settle(s.upperArmL.rotation.z, p.upperArmLZ + 0.55 + groove * 0.52 + accent * 0.12, 0.24);
+    s.upperArmR.rotation.z = settle(s.upperArmR.rotation.z, p.upperArmRZ - 0.55 - groove * 0.52 + accent * 0.12, 0.24);
+    s.foreArmL.rotation.z = settle(s.foreArmL.rotation.z, p.foreArmLZ + 0.5 + Math.sin(beat * 1.5) * 0.4, 0.24);
+    s.foreArmR.rotation.z = settle(s.foreArmR.rotation.z, p.foreArmRZ - 0.5 - Math.sin(beat * 1.5 + Math.PI * 0.3) * 0.4, 0.24);
+
+    s.thighL.rotation.z = settle(s.thighL.rotation.z, p.thighLZ + groove * 0.08, 0.16);
+    s.thighR.rotation.z = settle(s.thighR.rotation.z, p.thighRZ - groove * 0.08, 0.16);
+    s.shinL.rotation.z = settle(s.shinL.rotation.z, p.shinLZ + Math.sin(beat * 2) * 0.05, 0.16);
+    s.shinR.rotation.z = settle(s.shinR.rotation.z, p.shinRZ - Math.sin(beat * 2 + Math.PI * 0.5) * 0.05, 0.16);
+    s.footL.rotation.x = settle(s.footL.rotation.x, Math.PI / 2.35 + accent * 0.06, 0.2);
+    s.footR.rotation.x = settle(s.footR.rotation.x, Math.PI / 2.35 + accent * 0.06, 0.2);
+  } else {
+    s.hips.rotation.z = settle(s.hips.rotation.z, 0, 0.12);
+    s.hips.rotation.y = settle(s.hips.rotation.y, 0, 0.12);
+    s.chest.rotation.z = settle(s.chest.rotation.z, p.chestZ, 0.12);
+    s.chest.rotation.y = settle(s.chest.rotation.y, 0, 0.12);
+    s.head.rotation.y = settle(s.head.rotation.y, p.headY, 0.12);
+    s.head.rotation.x = settle(s.head.rotation.x, 0, 0.12);
+    s.jaw.rotation.x = settle(s.jaw.rotation.x, Math.PI / 2.1, 0.12);
+    s.upperArmL.rotation.z = settle(s.upperArmL.rotation.z, p.upperArmLZ, 0.12);
+    s.upperArmR.rotation.z = settle(s.upperArmR.rotation.z, p.upperArmRZ, 0.12);
+    s.foreArmL.rotation.z = settle(s.foreArmL.rotation.z, p.foreArmLZ, 0.12);
+    s.foreArmR.rotation.z = settle(s.foreArmR.rotation.z, p.foreArmRZ, 0.12);
+    s.thighL.rotation.z = settle(s.thighL.rotation.z, p.thighLZ, 0.12);
+    s.thighR.rotation.z = settle(s.thighR.rotation.z, p.thighRZ, 0.12);
+    s.shinL.rotation.z = settle(s.shinL.rotation.z, p.shinLZ, 0.12);
+    s.shinR.rotation.z = settle(s.shinR.rotation.z, p.shinRZ, 0.12);
+    s.footL.rotation.x = settle(s.footL.rotation.x, Math.PI / 2.35, 0.12);
+    s.footR.rotation.x = settle(s.footR.rotation.x, Math.PI / 2.35, 0.12);
+  }
+}
+
 function resizeLayers() {
   const w = window.innerWidth;
   const h = window.innerHeight;
@@ -888,10 +1158,15 @@ function detectHands() {
       dropGrabbedItem();
       grabState.pinchActive = false;
       flowerControl.openPalmHeld = false;
+      skeletonControl.danceActive = false;
       setStatus(`Show your hand to start ${activeMode} mode`);
     } else {
       setModeVisibility(true);
-      if (secondaryHand) {
+      if (activeMode === 'skeleton') {
+        setStatus(skeletonControl.danceActive
+          ? 'Skeleton mode: open palm detected, dancing'
+          : 'Skeleton mode: show open palm to dance');
+      } else if (secondaryHand) {
         setStatus(activeMode === 'galaxy'
           ? 'Galaxy mode: hand 1 galaxy, hand 2 planets'
           : 'Flower mode: hand 1 flower, hand 2 butterflies');
@@ -918,6 +1193,7 @@ function animate() {
   animatePlanets();
   animateFlower(t);
   animateButterflies(t);
+  animateSkeleton(t);
 
   renderer.render(scene, camera);
 }
