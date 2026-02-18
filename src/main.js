@@ -6,6 +6,7 @@ const video = document.getElementById('webcam');
 const overlayCanvas = document.getElementById('output_canvas');
 const statusEl = document.getElementById('status');
 const overlayCtx = overlayCanvas.getContext('2d');
+const modeButtons = document.querySelectorAll('.mode-btn');
 const MIRROR_CAMERA = true;
 
 const scene = new THREE.Scene();
@@ -18,7 +19,7 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.domElement.dataset.three = 'scene';
 document.body.appendChild(renderer.domElement);
 
-scene.add(new THREE.AmbientLight(0xffffff, 0.9));
+scene.add(new THREE.AmbientLight(0xffffff, 0.85));
 const rim = new THREE.DirectionalLight(0x7ea1ff, 1.2);
 rim.position.set(6, 8, 8);
 scene.add(rim);
@@ -26,28 +27,44 @@ scene.add(rim);
 let handLandmarker;
 let lastVideoTime = -1;
 let detectedHands = [];
+let activeMode = 'galaxy';
+const FLOWER_VARIANTS = ['rose', 'sunflower', 'lotus', 'daisy', 'camellia', 'chrysanthemum'];
+
 let galaxy = null;
 let solarSystem = null;
+let flowerWorld = null;
+let butterflySystem = null;
+
 const raycaster = new THREE.Raycaster();
 const grabState = {
-  planet: null,
+  item: null,
+  kind: null,
   pinchActive: false,
   grabPlaneZ: 0,
 };
 
-const controlState = {
+const galaxyControl = {
   targetScale: 1,
   currentScale: 1,
-  spinBoost: 0,
+  spinBoost: 0.012,
   depthSpeed: 0.03,
   colorShiftActive: false,
   colorHue: 0.62,
 };
 
-const planetControlState = {
-  orbitSpeed: 0.01,
+const flowerControl = {
+  targetScale: 1,
+  currentScale: 1,
+  spinBoost: 0.01,
+  variantIndex: 0,
+  openPalmHeld: false,
+  lastVariantSwitchMs: 0,
+};
+
+const companionControl = {
   tiltX: 0,
   tiltY: 0,
+  motionSpeed: 0.01,
 };
 
 function setStatus(text) {
@@ -55,17 +72,19 @@ function setStatus(text) {
 }
 
 function describeError(err) {
-  if (err instanceof Error) {
-    return `${err.name}: ${err.message}`;
-  }
-  if (typeof err === 'string') {
-    return err;
-  }
+  if (err instanceof Error) return `${err.name}: ${err.message}`;
+  if (typeof err === 'string') return err;
   try {
     return JSON.stringify(err);
   } catch {
     return String(err);
   }
+}
+
+function setActiveModeButton() {
+  modeButtons.forEach((btn) => {
+    btn.classList.toggle('active', btn.dataset.mode === activeMode);
+  });
 }
 
 function createGalaxy() {
@@ -96,9 +115,11 @@ function createGalaxy() {
     positions[i3] = Math.cos(armAngle + spinAngle) * r + randomX;
     positions[i3 + 1] = (Math.random() - 0.5) * 0.9 + randomY;
     positions[i3 + 2] = Math.sin(armAngle + spinAngle) * r + randomZ;
+
     basePositions[i3] = positions[i3];
     basePositions[i3 + 1] = positions[i3 + 1];
     basePositions[i3 + 2] = positions[i3 + 2];
+
     radii[i] = Math.hypot(positions[i3], positions[i3 + 2]);
     twists[i] = (Math.random() - 0.5) * 0.9;
 
@@ -124,11 +145,8 @@ function createGalaxy() {
 
   const points = new THREE.Points(geometry, material);
   points.frustumCulled = false;
-  points.userData = {
-    basePositions,
-    radii,
-    twists,
-  };
+  points.visible = false;
+  points.userData = { basePositions, radii, twists };
   scene.add(points);
   return points;
 }
@@ -136,14 +154,11 @@ function createGalaxy() {
 function createSolarSystem() {
   const group = new THREE.Group();
   group.position.set(0, -2, -3);
+  group.visible = false;
 
   const sun = new THREE.Mesh(
     new THREE.SphereGeometry(1, 24, 24),
-    new THREE.MeshStandardMaterial({
-      color: 0xffcc5c,
-      emissive: 0xffa500,
-      emissiveIntensity: 0.6,
-    }),
+    new THREE.MeshStandardMaterial({ color: 0xffcc5c, emissive: 0xffa500, emissiveIntensity: 0.6 }),
   );
   group.add(sun);
 
@@ -172,17 +187,263 @@ function createSolarSystem() {
   return group;
 }
 
+function createFlowerWorld() {
+  const group = new THREE.Group();
+  group.position.set(0, -0.5, -2.8);
+  group.visible = false;
+  group.userData = { center: null, petals: [], bloomRoot: null, variant: FLOWER_VARIANTS[0] };
+  applyFlowerVariant(group, FLOWER_VARIANTS[0]);
+  scene.add(group);
+  return group;
+}
+
+function addPetalRing(root, petals, options) {
+  const {
+    count,
+    radius,
+    size,
+    color,
+    y = 0,
+    jitter = 0.06,
+    tilt = Math.PI / 2.5,
+    roughness = 0.52,
+    wave = 0.035,
+  } = options;
+
+  for (let i = 0; i < count; i += 1) {
+    const petal = new THREE.Mesh(
+      new THREE.SphereGeometry(0.5, 22, 22),
+      new THREE.MeshStandardMaterial({
+        color,
+        roughness,
+        metalness: 0.02,
+        emissive: new THREE.Color(color).multiplyScalar(0.05),
+      }),
+    );
+    const angle = (i / count) * Math.PI * 2;
+    const localRadius = radius + (Math.random() - 0.5) * jitter;
+    petal.position.set(
+      Math.cos(angle) * localRadius,
+      y + Math.sin(i * 0.45) * wave,
+      Math.sin(angle) * localRadius,
+    );
+    petal.scale.set(size[0], size[1], size[2]);
+    petal.rotation.z = angle;
+    petal.rotation.x = tilt;
+    petal.userData.baseScaleX = size[0];
+    petal.userData.baseScaleY = size[1];
+    petal.userData.baseScaleZ = size[2];
+    root.add(petal);
+    petals.push(petal);
+  }
+}
+
+function applyFlowerVariant(group, variantName) {
+  if (!group) return;
+
+  if (group.userData.bloomRoot) {
+    group.remove(group.userData.bloomRoot);
+    disposeObject3D(group.userData.bloomRoot);
+  }
+
+  const bloomRoot = new THREE.Group();
+  const petals = [];
+  let center = null;
+
+  switch (variantName) {
+    case 'rose':
+      addPetalRing(bloomRoot, petals, { count: 24, radius: 1.55, size: [2.15, 0.84, 0.96], color: 0xe74d6f, y: 0.01, tilt: Math.PI / 2.75 });
+      addPetalRing(bloomRoot, petals, { count: 18, radius: 1.16, size: [1.72, 0.74, 0.9], color: 0xf06788, y: 0.12, tilt: Math.PI / 2.85 });
+      addPetalRing(bloomRoot, petals, { count: 12, radius: 0.82, size: [1.28, 0.66, 0.82], color: 0xff8ca2, y: 0.2, tilt: Math.PI / 3.1 });
+      center = new THREE.Mesh(
+        new THREE.SphereGeometry(0.42, 24, 24),
+        new THREE.MeshStandardMaterial({ color: 0xb7314f, roughness: 0.7, emissive: 0x651a2b, emissiveIntensity: 0.18 }),
+      );
+      center.scale.set(1, 0.9, 1);
+      break;
+    case 'sunflower':
+      addPetalRing(bloomRoot, petals, { count: 30, radius: 2.05, size: [2.35, 0.7, 0.86], color: 0xffc739, y: 0.04, tilt: Math.PI / 2.45, roughness: 0.6 });
+      addPetalRing(bloomRoot, petals, { count: 22, radius: 1.6, size: [1.8, 0.6, 0.8], color: 0xffd95e, y: 0.07, tilt: Math.PI / 2.55, roughness: 0.63 });
+      center = new THREE.Mesh(
+        new THREE.SphereGeometry(1.12, 36, 36),
+        new THREE.MeshStandardMaterial({ color: 0x3a2412, roughness: 0.95, emissive: 0x1f1208, emissiveIntensity: 0.15 }),
+      );
+      center.scale.set(1, 0.88, 1);
+      break;
+    case 'lotus':
+      addPetalRing(bloomRoot, petals, { count: 18, radius: 1.95, size: [2.0, 0.72, 0.92], color: 0xffaacb, y: -0.02, tilt: Math.PI / 2.15 });
+      addPetalRing(bloomRoot, petals, { count: 14, radius: 1.36, size: [1.58, 0.66, 0.84], color: 0xffbed8, y: 0.12, tilt: Math.PI / 2.2 });
+      addPetalRing(bloomRoot, petals, { count: 10, radius: 0.92, size: [1.2, 0.58, 0.76], color: 0xffd3e6, y: 0.22, tilt: Math.PI / 2.3 });
+      center = new THREE.Mesh(
+        new THREE.SphereGeometry(0.78, 28, 28),
+        new THREE.MeshStandardMaterial({ color: 0xf9dc7a, roughness: 0.82, emissive: 0xd2b04b, emissiveIntensity: 0.15 }),
+      );
+      center.scale.set(1, 0.94, 1);
+      break;
+    case 'daisy':
+      addPetalRing(bloomRoot, petals, { count: 26, radius: 1.82, size: [2.08, 0.62, 0.82], color: 0xf8f8ff, y: 0.02, tilt: Math.PI / 2.35, roughness: 0.5 });
+      addPetalRing(bloomRoot, petals, { count: 18, radius: 1.32, size: [1.45, 0.54, 0.72], color: 0xffffff, y: 0.11, tilt: Math.PI / 2.45, roughness: 0.48 });
+      center = new THREE.Mesh(
+        new THREE.SphereGeometry(0.94, 30, 30),
+        new THREE.MeshStandardMaterial({ color: 0xffd648, roughness: 0.75, emissive: 0xd79e22, emissiveIntensity: 0.2 }),
+      );
+      center.scale.set(1, 0.9, 1);
+      break;
+    case 'camellia':
+      addPetalRing(bloomRoot, petals, { count: 22, radius: 1.7, size: [1.95, 0.82, 0.95], color: 0xff90ad, y: 0.03, tilt: Math.PI / 2.7 });
+      addPetalRing(bloomRoot, petals, { count: 16, radius: 1.18, size: [1.55, 0.72, 0.84], color: 0xffa8c0, y: 0.14, tilt: Math.PI / 2.85 });
+      addPetalRing(bloomRoot, petals, { count: 12, radius: 0.8, size: [1.2, 0.62, 0.72], color: 0xffbfd3, y: 0.2, tilt: Math.PI / 3 });
+      center = new THREE.Mesh(
+        new THREE.SphereGeometry(0.52, 24, 24),
+        new THREE.MeshStandardMaterial({ color: 0xf8cfde, roughness: 0.72, emissive: 0xd98ea4, emissiveIntensity: 0.14 }),
+      );
+      center.scale.set(1, 0.92, 1);
+      break;
+    default:
+      addPetalRing(bloomRoot, petals, { count: 28, radius: 1.75, size: [2.12, 0.72, 0.9], color: 0xffa9df, y: 0.02, tilt: Math.PI / 2.55 });
+      addPetalRing(bloomRoot, petals, { count: 20, radius: 1.22, size: [1.62, 0.62, 0.78], color: 0xffc3e8, y: 0.1, tilt: Math.PI / 2.65 });
+      addPetalRing(bloomRoot, petals, { count: 14, radius: 0.88, size: [1.22, 0.56, 0.72], color: 0xffd8f1, y: 0.19, tilt: Math.PI / 2.8 });
+      center = new THREE.Mesh(
+        new THREE.SphereGeometry(0.62, 26, 26),
+        new THREE.MeshStandardMaterial({ color: 0xfff0a6, roughness: 0.8, emissive: 0xe8bf5a, emissiveIntensity: 0.14 }),
+      );
+      center.scale.set(1, 0.92, 1);
+      break;
+  }
+
+  center.userData.baseScaleX = center.scale.x;
+  center.userData.baseScaleY = center.scale.y;
+  center.userData.baseScaleZ = center.scale.z;
+  bloomRoot.add(center);
+  group.add(bloomRoot);
+  group.userData.center = center;
+  group.userData.petals = petals;
+  group.userData.bloomRoot = bloomRoot;
+  group.userData.variant = variantName;
+}
+
+function cycleFlowerVariant() {
+  if (!flowerWorld) return;
+  const now = performance.now();
+  if (now - flowerControl.lastVariantSwitchMs < 700) return;
+
+  flowerControl.lastVariantSwitchMs = now;
+  flowerControl.variantIndex = (flowerControl.variantIndex + 1) % FLOWER_VARIANTS.length;
+  const variantName = FLOWER_VARIANTS[flowerControl.variantIndex];
+  applyFlowerVariant(flowerWorld, variantName);
+  setStatus(`Flower changed: ${variantName}. Open palm again to switch.`);
+}
+
+function createButterflySystem() {
+  const group = new THREE.Group();
+  group.position.set(0, 0.2, -1.8);
+  group.visible = false;
+
+  const defs = [
+    { radius: 3.2, y: 0.4, speed: 1.1, color: 0x95e8ff },
+    { radius: 4.1, y: 1.1, speed: 0.85, color: 0xffb2f6 },
+    { radius: 2.6, y: -0.2, speed: 1.3, color: 0xfff08f },
+    { radius: 3.7, y: 0.7, speed: 1.0, color: 0xc3ffc5 },
+  ];
+
+  const butterflies = [];
+  for (const def of defs) {
+    const pivot = new THREE.Object3D();
+    const b = new THREE.Group();
+
+    const thorax = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.08, 0.32, 4, 10),
+      new THREE.MeshStandardMaterial({ color: 0x211a2f, roughness: 0.55, metalness: 0.08 }),
+    );
+    thorax.rotation.z = Math.PI / 2;
+    b.add(thorax);
+
+    const head = new THREE.Mesh(
+      new THREE.SphereGeometry(0.065, 12, 12),
+      new THREE.MeshStandardMaterial({ color: 0x2c2242, roughness: 0.45 }),
+    );
+    head.position.x = 0.2;
+    b.add(head);
+
+    const abdomen = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.06, 0.34, 4, 10),
+      new THREE.MeshStandardMaterial({ color: 0x1c1628, roughness: 0.62 }),
+    );
+    abdomen.rotation.z = Math.PI / 2;
+    abdomen.position.x = -0.18;
+    b.add(abdomen);
+
+    const antennaMat = new THREE.MeshStandardMaterial({ color: 0x15121f, roughness: 0.7 });
+    const antennaL = new THREE.Mesh(new THREE.CylinderGeometry(0.005, 0.005, 0.2, 8), antennaMat);
+    antennaL.position.set(0.24, 0.05, 0.03);
+    antennaL.rotation.z = -0.45;
+    antennaL.rotation.x = 0.35;
+    const antennaR = antennaL.clone();
+    antennaR.position.z = -0.03;
+    antennaR.rotation.x = -0.35;
+    b.add(antennaL, antennaR);
+
+    const wingColor = new THREE.Color(def.color);
+    const foreWingGeo = new THREE.SphereGeometry(0.26, 18, 18, 0, Math.PI);
+    const hindWingGeo = new THREE.SphereGeometry(0.2, 16, 16, 0, Math.PI);
+    const wingMat = new THREE.MeshStandardMaterial({
+      color: wingColor,
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.94,
+      roughness: 0.38,
+      metalness: 0.06,
+      emissive: wingColor.clone().multiplyScalar(0.12),
+    });
+
+    const wingRootL = new THREE.Group();
+    const foreWingL = new THREE.Mesh(foreWingGeo, wingMat.clone());
+    foreWingL.scale.set(1.35, 1.05, 0.22);
+    foreWingL.rotation.set(Math.PI / 2, 0.25, Math.PI / 2);
+    foreWingL.position.set(-0.02, 0.08, 0.19);
+    const hindWingL = new THREE.Mesh(hindWingGeo, wingMat.clone());
+    hindWingL.scale.set(1.2, 0.9, 0.22);
+    hindWingL.rotation.set(Math.PI / 2, -0.1, Math.PI / 2);
+    hindWingL.position.set(-0.09, -0.02, 0.15);
+    wingRootL.add(foreWingL, hindWingL);
+    wingRootL.position.set(0.02, 0, 0);
+
+    const wingRootR = wingRootL.clone();
+    wingRootR.scale.z = -1;
+
+    b.add(wingRootL, wingRootR);
+    b.position.set(def.radius, def.y, 0);
+    pivot.add(b);
+    group.add(pivot);
+
+    butterflies.push({
+      pivot,
+      body: thorax,
+      wingRootL,
+      wingRootR,
+      foreWingL,
+      hindWingL,
+      radius: def.radius,
+      baseY: def.y,
+      speed: def.speed,
+      angle: Math.random() * Math.PI * 2,
+      flapPhase: Math.random() * Math.PI * 2,
+      bobPhase: Math.random() * Math.PI * 2,
+      isGrabbed: false,
+    });
+  }
+
+  group.userData.butterflies = butterflies;
+  scene.add(group);
+  return group;
+}
+
 function disposeObject3D(root) {
   root.traverse((obj) => {
-    if (obj.geometry) {
-      obj.geometry.dispose();
-    }
+    if (obj.geometry) obj.geometry.dispose();
     if (obj.material) {
-      if (Array.isArray(obj.material)) {
-        obj.material.forEach((m) => m.dispose());
-      } else {
-        obj.material.dispose();
-      }
+      if (Array.isArray(obj.material)) obj.material.forEach((m) => m.dispose());
+      else obj.material.dispose();
     }
   });
 }
@@ -243,123 +504,286 @@ function drawLandmarks(hands) {
   });
 }
 
-function updateGalaxyFromPrimaryHand(landmarks) {
-  if (!galaxy || !landmarks) return;
-
-  const wrist = landmarks[0];
-  if (wrist) {
-    const x = (1 - wrist.x - 0.5) * 2;
-    const y = (wrist.y - 0.5) * 2;
-    galaxy.rotation.y = x * 0.9;
-    galaxy.rotation.x = y * 0.5;
-  }
-
-  controlState.targetScale = isPinch(landmarks) ? 1.7 : 1;
-  controlState.spinBoost = isFist(landmarks) ? 0.06 : 0.012;
-
-  const palmOpen = landmarks[9] && landmarks[0]
-    ? Math.hypot(
-        landmarks[9].x - landmarks[0].x,
-        landmarks[9].y - landmarks[0].y,
-        landmarks[9].z - landmarks[0].z,
-      )
-    : 0.12;
-
-  controlState.depthSpeed = THREE.MathUtils.clamp(0.015 + palmOpen * 0.35, 0.015, 0.1);
-  controlState.colorShiftActive = isOpenPalm(landmarks);
-}
-
 function getPinchNdc(landmarks) {
   const thumb = landmarks[4];
   const index = landmarks[8];
   if (!thumb || !index) return null;
   const pinchX = (thumb.x + index.x) * 0.5;
   const pinchY = (thumb.y + index.y) * 0.5;
-
   const mirroredX = 1 - pinchX;
-  return {
-    x: mirroredX * 2 - 1,
-    y: -(pinchY * 2 - 1),
-  };
+  return { x: mirroredX * 2 - 1, y: -(pinchY * 2 - 1) };
 }
 
 function worldPointFromNdcOnZPlane(ndcX, ndcY, planeZ) {
   raycaster.setFromCamera({ x: ndcX, y: ndcY }, camera);
   const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -planeZ);
   const hit = new THREE.Vector3();
-  const ok = raycaster.ray.intersectPlane(plane, hit);
-  return ok ? hit : null;
+  return raycaster.ray.intersectPlane(plane, hit) ? hit : null;
 }
 
-function tryGrabPlanet(landmarks) {
-  if (!solarSystem || grabState.planet) return;
-  const ndc = getPinchNdc(landmarks);
-  if (!ndc) return;
+function dropGrabbedItem() {
+  if (!grabState.item) return;
+  grabState.item.isGrabbed = false;
+  grabState.item = null;
+  grabState.kind = null;
+}
 
-  const planetMeshes = (solarSystem.userData.planets ?? []).map((p) => p.mesh);
+function tryGrabItem(landmarks) {
+  const ndc = getPinchNdc(landmarks);
+  if (!ndc || grabState.item) return;
+
+  let meshes = [];
+  if (activeMode === 'galaxy' && solarSystem) meshes = (solarSystem.userData.planets ?? []).map((p) => p.mesh);
+  if (activeMode === 'flower' && butterflySystem) meshes = (butterflySystem.userData.butterflies ?? []).map((b) => b.body);
+
+  if (!meshes.length) return;
+
   raycaster.setFromCamera({ x: ndc.x, y: ndc.y }, camera);
-  const hits = raycaster.intersectObjects(planetMeshes, false);
-  if (hits.length === 0) return;
+  const hits = raycaster.intersectObjects(meshes, false);
+  if (!hits.length) return;
 
   const selectedMesh = hits[0].object;
-  const selectedPlanet = (solarSystem.userData.planets ?? []).find((p) => p.mesh === selectedMesh);
-  if (!selectedPlanet) return;
 
-  const worldPos = new THREE.Vector3();
-  selectedMesh.getWorldPosition(worldPos);
-  selectedPlanet.isGrabbed = true;
-  grabState.planet = selectedPlanet;
-  grabState.grabPlaneZ = worldPos.z;
+  if (activeMode === 'galaxy' && solarSystem) {
+    const selected = (solarSystem.userData.planets ?? []).find((p) => p.mesh === selectedMesh);
+    if (!selected) return;
+    selected.isGrabbed = true;
+    const worldPos = new THREE.Vector3();
+    selected.mesh.getWorldPosition(worldPos);
+    grabState.item = selected;
+    grabState.kind = 'planet';
+    grabState.grabPlaneZ = worldPos.z;
+    return;
+  }
+
+  if (activeMode === 'flower' && butterflySystem) {
+    const selected = (butterflySystem.userData.butterflies ?? []).find((b) => b.body === selectedMesh);
+    if (!selected) return;
+    selected.isGrabbed = true;
+    const worldPos = new THREE.Vector3();
+    selected.pivot.getWorldPosition(worldPos);
+    grabState.item = selected;
+    grabState.kind = 'butterfly';
+    grabState.grabPlaneZ = worldPos.z;
+  }
 }
 
-function updateGrabbedPlanet(landmarks) {
-  if (!grabState.planet) return;
+function updateGrabbedItem(landmarks) {
+  if (!grabState.item || !grabState.kind) return;
   const ndc = getPinchNdc(landmarks);
   if (!ndc) return;
 
   const worldPoint = worldPointFromNdcOnZPlane(ndc.x, ndc.y, grabState.grabPlaneZ);
   if (!worldPoint) return;
 
-  const localPoint = grabState.planet.orbitPivot.worldToLocal(worldPoint.clone());
-  grabState.planet.mesh.position.copy(localPoint);
+  if (grabState.kind === 'planet') {
+    const localPoint = grabState.item.orbitPivot.worldToLocal(worldPoint.clone());
+    grabState.item.mesh.position.copy(localPoint);
+    return;
+  }
+
+  if (grabState.kind === 'butterfly' && butterflySystem) {
+    const localPoint = butterflySystem.worldToLocal(worldPoint.clone());
+    grabState.item.pivot.position.copy(localPoint);
+  }
 }
 
-function dropPlanet() {
-  if (!grabState.planet) return;
-  grabState.planet.isGrabbed = false;
-  grabState.planet = null;
+function updatePrimaryFromHand(landmarks) {
+  if (!landmarks) return;
+
+  const wrist = landmarks[0];
+  const x = wrist ? (1 - wrist.x - 0.5) * 2 : 0;
+  const y = wrist ? (wrist.y - 0.5) * 2 : 0;
+  const pinch = isPinch(landmarks);
+  const fist = isFist(landmarks);
+  const openPalm = isOpenPalm(landmarks);
+
+  if (activeMode === 'galaxy' && galaxy) {
+    galaxy.rotation.y = x * 0.9;
+    galaxy.rotation.x = y * 0.5;
+    galaxyControl.targetScale = pinch ? 1.7 : 1;
+    galaxyControl.spinBoost = fist ? 0.06 : 0.012;
+    galaxyControl.colorShiftActive = openPalm;
+
+    const palmOpen = landmarks[9] && landmarks[0]
+      ? Math.hypot(
+          landmarks[9].x - landmarks[0].x,
+          landmarks[9].y - landmarks[0].y,
+          landmarks[9].z - landmarks[0].z,
+        )
+      : 0.12;
+    galaxyControl.depthSpeed = THREE.MathUtils.clamp(0.015 + palmOpen * 0.35, 0.015, 0.1);
+  }
+
+  if (activeMode === 'flower' && flowerWorld) {
+    flowerWorld.rotation.y = x * 0.8;
+    flowerWorld.rotation.x = y * 0.35;
+    flowerControl.targetScale = pinch ? 1.45 : 1;
+    flowerControl.spinBoost = fist ? 0.045 : 0.01;
+    if (openPalm && !flowerControl.openPalmHeld) {
+      cycleFlowerVariant();
+    }
+    flowerControl.openPalmHeld = openPalm;
+  }
 }
 
-function updatePlanetsFromSecondaryHand(landmarks) {
-  if (!solarSystem) return;
-
+function updateCompanionFromHand(landmarks) {
   if (!landmarks) {
+    dropGrabbedItem();
     grabState.pinchActive = false;
-    dropPlanet();
     return;
   }
 
   const wrist = landmarks[0];
   if (wrist) {
-    const x = (1 - wrist.x - 0.5) * 2;
-    const y = (wrist.y - 0.5) * 2;
-    planetControlState.tiltY = x * 0.8;
-    planetControlState.tiltX = y * 0.45;
+    companionControl.tiltY = (1 - wrist.x - 0.5) * 2 * 0.75;
+    companionControl.tiltX = (wrist.y - 0.5) * 2 * 0.45;
   }
 
-  planetControlState.orbitSpeed = isFist(landmarks) ? 0.04 : 0.01;
+  companionControl.motionSpeed = isFist(landmarks) ? 0.04 : 0.01;
 
-  const pinchActiveNow = isPinch(landmarks);
-  if (pinchActiveNow && !grabState.pinchActive) {
-    tryGrabPlanet(landmarks);
+  const pinchNow = isPinch(landmarks);
+  if (pinchNow && !grabState.pinchActive) tryGrabItem(landmarks);
+  if (pinchNow) updateGrabbedItem(landmarks);
+  if (!pinchNow && grabState.pinchActive) dropGrabbedItem();
+  grabState.pinchActive = pinchNow;
+}
+
+function ensureModeObjects() {
+  if (!galaxy) galaxy = createGalaxy();
+  if (!solarSystem) solarSystem = createSolarSystem();
+  if (!flowerWorld) flowerWorld = createFlowerWorld();
+  if (!butterflySystem) butterflySystem = createButterflySystem();
+}
+
+function setModeVisibility(visible) {
+  if (galaxy) galaxy.visible = visible && activeMode === 'galaxy';
+  if (solarSystem) solarSystem.visible = visible && activeMode === 'galaxy';
+  if (flowerWorld) flowerWorld.visible = visible && activeMode === 'flower';
+  if (butterflySystem) butterflySystem.visible = visible && activeMode === 'flower';
+}
+
+function switchMode(mode) {
+  if (mode === activeMode) return;
+  activeMode = mode;
+  dropGrabbedItem();
+  grabState.pinchActive = false;
+  flowerControl.openPalmHeld = false;
+  ensureModeObjects();
+  setModeVisibility(Boolean(detectedHands[0]));
+  setActiveModeButton();
+  if (activeMode === 'galaxy') {
+    setStatus('Galaxy mode selected. Hand 1 galaxy, hand 2 planets.');
+  } else {
+    setStatus('Flower mode selected. Open palm to switch flower type.');
   }
-  if (pinchActiveNow) {
-    updateGrabbedPlanet(landmarks);
+}
+
+function animateGalaxy(t) {
+  if (!galaxy?.visible) return;
+
+  galaxyControl.currentScale += (galaxyControl.targetScale - galaxyControl.currentScale) * 0.14;
+  const pulse = 1 + Math.sin(t * 2.2) * 0.045;
+  galaxy.scale.setScalar(galaxyControl.currentScale * pulse);
+  galaxy.rotation.z += galaxyControl.spinBoost * 0.9;
+
+  const pos = galaxy.geometry.attributes.position.array;
+  const { basePositions, radii, twists } = galaxy.userData;
+  const swirlSpeed = THREE.MathUtils.mapLinear(galaxyControl.depthSpeed, 0.015, 0.1, 0.5, 2);
+
+  for (let i = 0; i < radii.length; i += 1) {
+    const i3 = i * 3;
+    const bx = basePositions[i3];
+    const by = basePositions[i3 + 1];
+    const bz = basePositions[i3 + 2];
+    const r = radii[i];
+    const baseAngle = Math.atan2(bz, bx);
+    const angle = baseAngle + t * (0.1 * swirlSpeed + r * 0.0028) + twists[i];
+    const wobble = 1 + Math.sin(t * 1.8 + twists[i] * 8 + r * 0.85) * 0.06;
+
+    pos[i3] = Math.cos(angle) * r * wobble + Math.sin(t * 0.8 + i * 0.013) * 0.02;
+    pos[i3 + 1] = by + Math.sin(t * 1.4 + r * 0.7 + twists[i] * 3) * 0.04;
+    pos[i3 + 2] = Math.sin(angle) * r * wobble;
   }
-  if (!pinchActiveNow && grabState.pinchActive) {
-    dropPlanet();
+
+  galaxy.geometry.attributes.position.needsUpdate = true;
+  galaxy.material.opacity = 0.82 + Math.sin(t * 2.1) * 0.12;
+
+  if (galaxyControl.colorShiftActive) {
+    galaxyControl.colorHue = (galaxyControl.colorHue + 0.003) % 1;
+    galaxy.material.color.setHSL(galaxyControl.colorHue, 0.85, 0.7);
+  } else {
+    galaxy.material.color.lerp(new THREE.Color(0xffffff), 0.08);
   }
-  grabState.pinchActive = pinchActiveNow;
+}
+
+function animatePlanets() {
+  if (!solarSystem?.visible) return;
+
+  solarSystem.rotation.x += (companionControl.tiltX - solarSystem.rotation.x) * 0.1;
+  solarSystem.rotation.y += (companionControl.tiltY - solarSystem.rotation.y) * 0.1;
+
+  const planets = solarSystem.userData.planets ?? [];
+  for (const planet of planets) {
+    if (planet.isGrabbed) continue;
+    planet.angle += planet.speed * companionControl.motionSpeed;
+    planet.orbitPivot.rotation.y = planet.angle;
+  }
+}
+
+function animateFlower(t) {
+  if (!flowerWorld?.visible) return;
+
+  flowerControl.currentScale += (flowerControl.targetScale - flowerControl.currentScale) * 0.12;
+  const bloomPulse = 1 + Math.sin(t * 2.8) * 0.035;
+  flowerWorld.scale.setScalar(flowerControl.currentScale * bloomPulse * 1.38);
+  flowerWorld.rotation.z += flowerControl.spinBoost * 0.3;
+
+  const petals = flowerWorld.userData.petals ?? [];
+  petals.forEach((petal, idx) => {
+    const wobble = 1 + Math.sin(t * 3.2 + idx * 0.7) * 0.06;
+    petal.scale.x = petal.userData.baseScaleX * wobble;
+    petal.scale.y = petal.userData.baseScaleY + Math.sin(t * 2.5 + idx) * 0.03;
+    petal.scale.z = petal.userData.baseScaleZ;
+  });
+
+  const center = flowerWorld.userData.center;
+  if (center) {
+    const p = 1 + Math.sin(t * 2.2) * 0.03;
+    center.scale.set(
+      center.userData.baseScaleX * p,
+      center.userData.baseScaleY * p,
+      center.userData.baseScaleZ * p,
+    );
+    center.material.emissiveIntensity = 0.12 + Math.sin(t * 1.7) * 0.05;
+  }
+}
+
+function animateButterflies(t) {
+  if (!butterflySystem?.visible) return;
+
+  butterflySystem.rotation.x += (companionControl.tiltX - butterflySystem.rotation.x) * 0.09;
+  butterflySystem.rotation.y += (companionControl.tiltY - butterflySystem.rotation.y) * 0.09;
+
+  const butterflies = butterflySystem.userData.butterflies ?? [];
+  for (const b of butterflies) {
+    if (!b.isGrabbed) {
+      b.angle += b.speed * companionControl.motionSpeed * 0.55;
+      b.pivot.position.x = Math.cos(b.angle) * b.radius;
+      b.pivot.position.z = Math.sin(b.angle) * b.radius;
+      b.pivot.position.y = b.baseY + Math.sin(t * 2.2 + b.angle * 1.5 + b.bobPhase) * 0.35;
+      b.pivot.lookAt(0, b.pivot.position.y, 0);
+      b.body.rotation.y = Math.sin(t * 5 + b.bobPhase) * 0.12;
+      b.body.rotation.x = Math.sin(t * 3 + b.bobPhase) * 0.06;
+    }
+
+    const flap = Math.sin(t * 17 + b.flapPhase) * 0.9;
+    const glide = Math.cos(t * 8 + b.flapPhase) * 0.08;
+    b.wingRootL.rotation.y = flap + 0.25 + glide;
+    b.wingRootR.rotation.y = -flap - 0.25 - glide;
+    b.foreWingL.rotation.x = Math.PI / 2 + Math.sin(t * 9 + b.flapPhase) * 0.12;
+    b.hindWingL.rotation.x = Math.PI / 2 + Math.sin(t * 9 + b.flapPhase + 0.5) * 0.1;
+  }
 }
 
 function resizeLayers() {
@@ -384,9 +808,7 @@ async function setupHandLandmarker() {
     vision = await FilesetResolver.forVisionTasks('/mediapipe');
   } catch (localWasmError) {
     console.warn('Local MediaPipe WASM load failed, trying CDN.', localWasmError);
-    vision = await FilesetResolver.forVisionTasks(
-      'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm',
-    );
+    vision = await FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.22/wasm');
   }
 
   const modelCandidates = [
@@ -394,10 +816,7 @@ async function setupHandLandmarker() {
     'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/latest/hand_landmarker.task',
   ];
 
-  const commonOptions = {
-    runningMode: 'VIDEO',
-    numHands: 2,
-  };
+  const commonOptions = { runningMode: 'VIDEO', numHands: 2 };
 
   async function tryCreateLandmarker(delegate) {
     let lastError = null;
@@ -405,10 +824,7 @@ async function setupHandLandmarker() {
       try {
         return await HandLandmarker.createFromOptions(vision, {
           ...commonOptions,
-          baseOptions: {
-            modelAssetPath,
-            delegate,
-          },
+          baseOptions: { modelAssetPath, delegate },
         });
       } catch (err) {
         lastError = err;
@@ -427,19 +843,16 @@ async function setupHandLandmarker() {
       handLandmarker = await tryCreateLandmarker('CPU');
       setStatus('Hand model ready (CPU)');
     } catch (cpuError) {
-      throw new Error(
-        `Hand model init failed. GPU: ${describeError(gpuError)} | CPU: ${describeError(cpuError)}`,
-      );
+      throw new Error(`Hand model init failed. GPU: ${describeError(gpuError)} | CPU: ${describeError(cpuError)}`);
     }
   }
 }
 
 async function setupWebcam() {
   if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error(
-      'getUserMedia is unavailable. Use a modern browser on localhost/HTTPS and allow camera access.',
-    );
+    throw new Error('getUserMedia is unavailable. Use a modern browser on localhost/HTTPS and allow camera access.');
   }
+
   const stream = await navigator.mediaDevices.getUserMedia({
     video: {
       facingMode: 'user',
@@ -448,6 +861,7 @@ async function setupWebcam() {
     },
     audio: false,
   });
+
   video.srcObject = stream;
   await video.play();
 }
@@ -460,43 +874,37 @@ function detectHands() {
 
   if (video.currentTime !== lastVideoTime) {
     lastVideoTime = video.currentTime;
+
     const result = handLandmarker.detectForVideo(video, performance.now());
     detectedHands = result.landmarks ?? [];
+
     const primaryHand = detectedHands[0] ?? null;
     const secondaryHand = detectedHands[1] ?? null;
 
-    if (primaryHand && !galaxy) {
-      galaxy = createGalaxy();
-      solarSystem = createSolarSystem();
-      setStatus('Hand detected: galaxy + planets online');
-    }
+    ensureModeObjects();
 
-    if (primaryHand && galaxy) {
-      galaxy.visible = true;
-    }
-
-    if (!primaryHand && galaxy) {
-      galaxy.visible = false;
-    }
-
-    if (!primaryHand && solarSystem) {
-      scene.remove(solarSystem);
-      disposeObject3D(solarSystem);
-      solarSystem = null;
-      dropPlanet();
+    if (!primaryHand) {
+      setModeVisibility(false);
+      dropGrabbedItem();
       grabState.pinchActive = false;
-      setStatus('Show your hand to spawn galaxy and planets');
-    }
-
-    if (primaryHand && secondaryHand) {
-      setStatus('Two hands active: hand 1 galaxy, hand 2 pinch-drag planets');
-    } else if (primaryHand) {
-      setStatus('Show second hand to pinch and move planets');
+      flowerControl.openPalmHeld = false;
+      setStatus(`Show your hand to start ${activeMode} mode`);
+    } else {
+      setModeVisibility(true);
+      if (secondaryHand) {
+        setStatus(activeMode === 'galaxy'
+          ? 'Galaxy mode: hand 1 galaxy, hand 2 planets'
+          : 'Flower mode: hand 1 flower, hand 2 butterflies');
+      } else {
+        setStatus(activeMode === 'galaxy'
+          ? 'Show second hand to control planets'
+          : 'Show second hand to control butterflies');
+      }
     }
 
     drawLandmarks(detectedHands);
-    updateGalaxyFromPrimaryHand(primaryHand);
-    updatePlanetsFromSecondaryHand(secondaryHand);
+    updatePrimaryFromHand(primaryHand);
+    updateCompanionFromHand(secondaryHand);
   }
 
   requestAnimationFrame(detectHands);
@@ -505,53 +913,11 @@ function detectHands() {
 function animate() {
   requestAnimationFrame(animate);
 
-  if (galaxy?.visible) {
-    controlState.currentScale += (controlState.targetScale - controlState.currentScale) * 0.14;
-    const t = performance.now() * 0.001;
-    const pulse = 1 + Math.sin(t * 2.2) * 0.045;
-    galaxy.scale.setScalar(controlState.currentScale * pulse);
-
-    galaxy.rotation.z += controlState.spinBoost * 0.9;
-
-    const pos = galaxy.geometry.attributes.position.array;
-    const { basePositions, radii, twists } = galaxy.userData;
-    const swirlSpeed = THREE.MathUtils.mapLinear(controlState.depthSpeed, 0.015, 0.1, 0.5, 2);
-    for (let i = 0; i < radii.length; i += 1) {
-      const i3 = i * 3;
-      const bx = basePositions[i3];
-      const by = basePositions[i3 + 1];
-      const bz = basePositions[i3 + 2];
-      const r = radii[i];
-      const baseAngle = Math.atan2(bz, bx);
-      const angle = baseAngle + t * (0.1 * swirlSpeed + r * 0.0028) + twists[i];
-      const wobble = 1 + Math.sin(t * 1.8 + twists[i] * 8 + r * 0.85) * 0.06;
-
-      pos[i3] = Math.cos(angle) * r * wobble + Math.sin(t * 0.8 + i * 0.013) * 0.02;
-      pos[i3 + 1] = by + Math.sin(t * 1.4 + r * 0.7 + twists[i] * 3) * 0.04;
-      pos[i3 + 2] = Math.sin(angle) * r * wobble;
-    }
-    galaxy.geometry.attributes.position.needsUpdate = true;
-    galaxy.material.opacity = 0.82 + Math.sin(t * 2.1) * 0.12;
-
-    if (controlState.colorShiftActive) {
-      controlState.colorHue = (controlState.colorHue + 0.003) % 1;
-      galaxy.material.color.setHSL(controlState.colorHue, 0.85, 0.7);
-    } else {
-      galaxy.material.color.lerp(new THREE.Color(0xffffff), 0.08);
-    }
-  }
-
-  if (solarSystem) {
-    solarSystem.rotation.x += (planetControlState.tiltX - solarSystem.rotation.x) * 0.1;
-    solarSystem.rotation.y += (planetControlState.tiltY - solarSystem.rotation.y) * 0.1;
-
-    const planets = solarSystem.userData.planets ?? [];
-    for (const planet of planets) {
-      if (planet.isGrabbed) continue;
-      planet.angle += planet.speed * planetControlState.orbitSpeed;
-      planet.orbitPivot.rotation.y = planet.angle;
-    }
-  }
+  const t = performance.now() * 0.001;
+  animateGalaxy(t);
+  animatePlanets();
+  animateFlower(t);
+  animateButterflies(t);
 
   renderer.render(scene, camera);
 }
@@ -560,13 +926,20 @@ async function init() {
   try {
     applyCameraMirror(MIRROR_CAMERA);
     resizeLayers();
+    setActiveModeButton();
+
+    modeButtons.forEach((btn) => {
+      btn.addEventListener('click', () => switchMode(btn.dataset.mode));
+    });
+
     setStatus('Loading MediaPipe model...');
     await setupHandLandmarker();
 
     setStatus('Opening camera...');
     await setupWebcam();
 
-    setStatus('Show your hand to spawn galaxy and planets');
+    ensureModeObjects();
+    setStatus('Show your hand to start galaxy mode');
     detectHands();
     animate();
   } catch (err) {
@@ -592,9 +965,7 @@ async function init() {
 }
 
 window.addEventListener('error', (event) => {
-  if (event.error) {
-    setStatus(`Runtime error: ${describeError(event.error)}`);
-  }
+  if (event.error) setStatus(`Runtime error: ${describeError(event.error)}`);
 });
 
 window.addEventListener('unhandledrejection', (event) => {

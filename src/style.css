@@ -51,6 +51,43 @@ body {
   backdrop-filter: blur(8px);
 }
 
+#mode-controls {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 6;
+  display: flex;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 999px;
+  background: rgba(7, 11, 26, 0.75);
+  border: 1px solid rgba(132, 160, 255, 0.35);
+  backdrop-filter: blur(10px);
+}
+
+.mode-btn {
+  border: 1px solid rgba(142, 172, 255, 0.35);
+  color: #ecf1ff;
+  background: rgba(17, 29, 62, 0.82);
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: 160ms ease;
+}
+
+.mode-btn:hover {
+  background: rgba(36, 57, 111, 0.9);
+}
+
+.mode-btn.active {
+  background: linear-gradient(120deg, #6f9cff, #67d2ff);
+  border-color: rgba(179, 227, 255, 0.8);
+  color: #061327;
+  font-weight: 700;
+}
+
 canvas[data-three="scene"] {
   position: fixed;
   inset: 0;

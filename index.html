@@ -6,6 +6,10 @@
     <title>Hand Galaxy Detector</title>
   </head>
   <body>
+    <div id="mode-controls">
+      <button class="mode-btn active" data-mode="galaxy">Galaxy</button>
+      <button class="mode-btn" data-mode="flower">Flower</button>
+    </div>
     <video id="webcam" autoplay playsinline muted></video>
     <canvas id="output_canvas"></canvas>
     <div id="status">Initializing hand detector...</div>
