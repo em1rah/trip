@@ -1,0 +1,59 @@
+:root {
+  color: #f5f7ff;
+  background: #05070f;
+  font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+  background: radial-gradient(circle at 30% 20%, #111a3a 0%, #05070f 55%, #02030a 100%);
+}
+
+#webcam,
+#output_canvas {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  object-fit: cover;
+  transform: scaleX(-1);
+}
+
+#webcam {
+  z-index: 1;
+  opacity: 0.22;
+}
+
+#output_canvas {
+  z-index: 3;
+  pointer-events: none;
+}
+
+#status {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 5;
+  padding: 8px 12px;
+  font-size: 14px;
+  border-radius: 999px;
+  color: #ebefff;
+  background: rgba(7, 11, 26, 0.72);
+  border: 1px solid rgba(132, 160, 255, 0.4);
+  backdrop-filter: blur(8px);
+}
+
+canvas[data-three="scene"] {
+  position: fixed;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
